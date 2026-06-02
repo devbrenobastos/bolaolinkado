@@ -236,6 +236,7 @@ export default function App() {
   const [isManageModalOpen, setIsManageModalOpen] = useState(false);
   const [newRoleSelected, setNewRoleSelected] = useState('user');
   const [isMembersExpanded, setIsMembersExpanded] = useState(false);
+  const [isPoolMembersModalOpen, setIsPoolMembersModalOpen] = useState(false);
 
   // Database synchronised state
   const [matches, setMatches] = useState([]);
@@ -1960,16 +1961,29 @@ export default function App() {
                         <span>Código de Convite: <strong className="text-white">{pool.invite_code}</strong></span>
                       </div>
 
-                      <button 
-                        onClick={() => {
-                          navigator.clipboard.writeText(pool.invite_code);
-                          triggerToast('Código copiado para a área de transferência!');
-                        }}
-                        className="flex items-center gap-1 text-[10px] font-bold text-[#FF7A00] hover:text-[#FF8C1A] bg-[#FF7A00]/10 px-2.5 py-1 rounded-sm border border-[#FF7A00]/20"
-                      >
-                        <Share2 className="w-3 h-3" />
-                        <span>COPIAR</span>
-                      </button>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => {
+                            setSelectedPool(pool);
+                            setIsPoolMembersModalOpen(true);
+                          }}
+                          className="flex items-center gap-1 text-[10px] font-bold text-[#FF7A00] hover:text-[#FF8C1A] bg-[#FF7A00]/10 px-2.5 py-1 rounded-sm border border-[#FF7A00]/20"
+                        >
+                          <Users className="w-3.5 h-3.5" />
+                          <span>PARTICIPANTES</span>
+                        </button>
+
+                        <button 
+                          onClick={() => {
+                            navigator.clipboard.writeText(pool.invite_code);
+                            triggerToast('Código copiado para a área de transferência!');
+                          }}
+                          className="flex items-center gap-1 text-[10px] font-bold text-[#FF7A00] hover:text-[#FF8C1A] bg-[#FF7A00]/10 px-2.5 py-1 rounded-sm border border-[#FF7A00]/20"
+                        >
+                          <Share2 className="w-3 h-3" />
+                          <span>COPIAR</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -2730,6 +2744,94 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- POOL MEMBERS DETAILS MODAL --- */}
+      {isPoolMembersModalOpen && selectedPool && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-[#151515] border border-[#262626] rounded-md w-full max-w-sm p-6 space-y-5 animate-fade-in shadow-2xl relative">
+            <button 
+              onClick={() => { setIsPoolMembersModalOpen(false); }}
+              className="absolute top-4 right-4 text-neutral-400 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div>
+              <h2 className="text-xl font-bold text-white">Participantes do Bolão</h2>
+               <p className="text-xs text-neutral-400 mt-1">Membros do grupo <strong className="text-[#FF7A00]">{selectedPool.name}</strong></p>
+            </div>
+
+            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+              {poolMembers.map((member) => {
+                const mProfile = member.profiles;
+                if (!mProfile) return null;
+                
+                const isOwner = selectedPool.owner_id === mProfile.id;
+                const targetRole = mProfile.role || 'user';
+                const currentUserRole = profile?.role || 'user';
+                const isCurrentUserOwner = selectedPool.owner_id === session.user.id;
+                
+                // Can manage logic
+                const canManage = isCurrentUserOwner || currentUserRole === 'admin' || currentUserRole === 'premium';
+                const isTargetAdmin = targetRole === 'admin';
+                const isPremiumLogged = currentUserRole === 'premium';
+                const isSelf = mProfile.id === session.user.id;
+                const isButtonDisabled = (isPremiumLogged && isTargetAdmin) || isSelf;
+
+                return (
+                  <div key={mProfile.id} className="flex items-center justify-between bg-[#1D1D1D] p-2.5 rounded-sm border border-[#262626] text-xs">
+                    <div className="flex items-center gap-2 truncate">
+                      <div className="w-8 h-8 rounded bg-[#FF7A00] flex items-center justify-center font-bold text-black text-xs overflow-hidden shrink-0">
+                        {mProfile.avatar_url ? (
+                          <img src={mProfile.avatar_url} alt="Membro" className="w-full h-full object-cover" />
+                        ) : (
+                          mProfile.full_name.charAt(0).toUpperCase()
+                        )}
+                      </div>
+                      <div className="flex flex-col truncate">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-white truncate">{mProfile.full_name}</span>
+                          {isOwner && <span className="text-[8px] bg-[#FF7A00]/20 text-[#FF7A00] px-1.5 py-0.5 rounded-sm uppercase font-bold">Criador</span>}
+                        </div>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <UserRoleBadge role={targetRole} />
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {canManage && (
+                      <button
+                        onClick={() => {
+                          setTargetUserToManage(mProfile);
+                          setNewRoleSelected(targetRole);
+                          setIsManageModalOpen(true);
+                        }}
+                        disabled={isButtonDisabled}
+                        className={`px-2.5 py-1 rounded-sm font-bold text-[10px] active:scale-95 transition-all border ${
+                          isButtonDisabled 
+                            ? 'bg-[#151515] border-[#262626] text-neutral-600 cursor-not-allowed' 
+                            : 'bg-[#262626] hover:bg-neutral-800 border-[#333] hover:text-[#FF7A00] text-neutral-300'
+                        }`}
+                      >
+                        Gerenciar
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="pt-2">
+              <button
+                onClick={() => setIsPoolMembersModalOpen(false)}
+                className="w-full bg-[#262626] hover:bg-neutral-800 text-white font-bold text-sm h-11 rounded-sm active:scale-95 transition-all"
+              >
+                Fechar
+              </button>
+            </div>
           </div>
         </div>
       )}
