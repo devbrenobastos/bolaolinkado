@@ -129,6 +129,24 @@ function ImageWithFallback({ src, alt }) {
   );
 }
 
+function UserRoleBadge({ role }) {
+  if (role === 'admin') {
+    return (
+      <span className="text-[10px] font-bold bg-[#F1C40F] text-black px-2 py-0.5 rounded-sm uppercase tracking-wider shadow-[0_0_8px_#F1C40F] inline-flex items-center shrink-0">
+        Admin
+      </span>
+    );
+  }
+  if (role === 'premium') {
+    return (
+      <span className="text-[10px] font-bold bg-[#FF7A00] text-white px-2 py-0.5 rounded-sm uppercase tracking-wider inline-flex items-center shrink-0">
+        Premium
+      </span>
+    );
+  }
+  return null;
+}
+
 const isTbdMatch = (match) => {
   const isGeneric = (name) => {
     if (!name) return true;
@@ -212,6 +230,12 @@ export default function App() {
 
   // Pending Approvals State
   const [pendingApprovals, setPendingApprovals] = useState([]);
+
+  // Management States
+  const [targetUserToManage, setTargetUserToManage] = useState(null);
+  const [isManageModalOpen, setIsManageModalOpen] = useState(false);
+  const [newRoleSelected, setNewRoleSelected] = useState('user');
+  const [isMembersExpanded, setIsMembersExpanded] = useState(false);
 
   // Database synchronised state
   const [matches, setMatches] = useState([]);
@@ -985,7 +1009,8 @@ export default function App() {
         name: pProfile.full_name,
         isUser: pProfile.id === session.user.id,
         points: totalPoints,
-        tier
+        tier,
+        role: pProfile.role || 'user'
       };
     }).filter(Boolean);
 
@@ -1236,7 +1261,10 @@ export default function App() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs text-neutral-400 font-semibold tracking-wider uppercase">Painel de Palpites</p>
-                <h1 className="text-3xl font-bold tracking-tight text-white mt-1">Olá, {profile?.full_name || 'Jogador'} 👋</h1>
+                <div className="flex items-center gap-2 mt-1">
+                  <h1 className="text-3xl font-bold tracking-tight text-white">Olá, {profile?.full_name || 'Jogador'} 👋</h1>
+                  <UserRoleBadge role={profile?.role} />
+                </div>
                 {!isPwa && (
                   <button
                     onClick={() => {
@@ -1333,6 +1361,81 @@ export default function App() {
                       </div>
                     </div>
                   )}
+
+                  {/* Collapsible Participants List */}
+                  <div className="border-t border-[#262626] pt-3 mt-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider">Participantes do Bolão</span>
+                      <button 
+                        onClick={() => setIsMembersExpanded(!isMembersExpanded)}
+                        className="text-[10px] text-[#FF7A00] font-bold uppercase tracking-wider hover:text-[#FF8C1A] active:scale-95 transition-all"
+                      >
+                        {isMembersExpanded ? 'Ocultar 🔼' : 'Ver Todos 🔽'}
+                      </button>
+                    </div>
+                    
+                    {isMembersExpanded && (
+                      <div className="mt-3 space-y-2 max-h-52 overflow-y-auto pr-1">
+                        {poolMembers.map((member) => {
+                          const mProfile = member.profiles;
+                          if (!mProfile) return null;
+                          
+                          const isOwner = selectedPool.owner_id === mProfile.id;
+                          const targetRole = mProfile.role || 'user';
+                          const currentUserRole = profile?.role || 'user';
+                          const isCurrentUserOwner = selectedPool.owner_id === session.user.id;
+                          
+                          // Can manage logic
+                          const canManage = isCurrentUserOwner || currentUserRole === 'admin' || currentUserRole === 'premium';
+                          const isTargetAdmin = targetRole === 'admin';
+                          const isPremiumLogged = currentUserRole === 'premium';
+                          const isSelf = mProfile.id === session.user.id;
+                          const isButtonDisabled = (isPremiumLogged && isTargetAdmin) || isSelf;
+
+                          return (
+                            <div key={mProfile.id} className="flex items-center justify-between bg-[#1D1D1D] p-2 rounded-sm border border-[#262626] text-xs">
+                              <div className="flex items-center gap-2 truncate">
+                                <div className="w-7 h-7 rounded bg-[#FF7A00] flex items-center justify-center font-bold text-black text-[10px] overflow-hidden shrink-0">
+                                  {mProfile.avatar_url ? (
+                                    <img src={mProfile.avatar_url} alt="Membro" className="w-full h-full object-cover" />
+                                  ) : (
+                                    mProfile.full_name.charAt(0).toUpperCase()
+                                  )}
+                                </div>
+                                <div className="flex flex-col truncate">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-bold text-white truncate">{mProfile.full_name}</span>
+                                    {isOwner && <span className="text-[8px] bg-[#FF7A00]/20 text-[#FF7A00] px-1 rounded-sm uppercase font-bold">Criador</span>}
+                                  </div>
+                                  <div className="flex items-center gap-1 mt-0.5">
+                                    <UserRoleBadge role={targetRole} />
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              {canManage && (
+                                <button
+                                  onClick={() => {
+                                    setTargetUserToManage(mProfile);
+                                    setNewRoleSelected(targetRole);
+                                    setIsManageModalOpen(true);
+                                  }}
+                                  disabled={isButtonDisabled}
+                                  className={`px-2.5 py-1 rounded-sm font-bold text-[10px] active:scale-95 transition-all border ${
+                                    isButtonDisabled 
+                                      ? 'bg-[#151515] border-[#262626] text-neutral-600 cursor-not-allowed' 
+                                      : 'bg-[#262626] hover:bg-neutral-800 border-[#333] hover:text-[#FF7A00] text-neutral-300'
+                                  }`}
+                                >
+                                  Gerenciar
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="bg-[#151515] border border-[#262626] rounded-md p-6 text-center shadow-card">
@@ -1983,9 +2086,12 @@ export default function App() {
                               </span>
                               
                               <div className="flex flex-col">
-                                <span className={`text-sm font-bold ${p.isUser ? 'text-[#FF7A00]' : 'text-white'}`}>
-                                  {p.name} {p.isUser && '👤'}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className={`text-sm font-bold ${p.isUser ? 'text-[#FF7A00]' : 'text-white'}`}>
+                                    {p.name} {p.isUser && '👤'}
+                                  </span>
+                                  <UserRoleBadge role={p.role} />
+                                </div>
                                 <div className="flex items-center gap-1.5 mt-0.5">
                                   <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-sm border ${tierColors[p.tier] || tierColors['Bronze']}`}>
                                     {p.tier}
@@ -2204,10 +2310,13 @@ export default function App() {
                   />
                 </label>
                 <div>
-                  <h3 className="text-base font-bold text-white">{profile?.full_name || 'Participante'}</h3>
-                  <p className="text-xs text-[#FF7A00] font-semibold mt-0.5">
-                    <span>{session?.user?.email}</span>
-                  </p>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-bold text-white">{profile?.full_name || 'Participante'}</h3>
+                      <UserRoleBadge role={profile?.role} />
+                    </div>
+                    <p className="text-xs text-[#FF7A00] font-semibold mt-0.5">
+                      <span>{session?.user?.email}</span>
+                    </p>
                 </div>
               </div>
               
@@ -2621,6 +2730,86 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- MANAGE USER ROLE MODAL --- */}
+      {isManageModalOpen && targetUserToManage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-[#151515] border border-[#262626] rounded-md w-full max-w-sm p-6 space-y-5 animate-fade-in shadow-2xl relative">
+            <button 
+              onClick={() => { setIsManageModalOpen(false); setTargetUserToManage(null); }}
+              className="absolute top-4 right-4 text-neutral-400 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div>
+              <h2 className="text-xl font-bold text-white">Gerenciar Usuário</h2>
+              <p className="text-xs text-neutral-400 mt-1">Altere a função de <strong className="text-white">{targetUserToManage.full_name}</strong> no sistema.</p>
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">Nova Função</label>
+                <select
+                  value={newRoleSelected}
+                  onChange={(e) => setNewRoleSelected(e.target.value)}
+                  className="w-full bg-[#1D1D1D] border border-[#262626] rounded-sm py-2 px-3 text-xs text-white focus:outline-none focus:border-[#FF7A00]"
+                >
+                  <option value="user">User (Participante Padrão)</option>
+                  <option value="premium">Premium (Moderador)</option>
+                  {/* Admin option is only available if current logged user is admin */}
+                  {profile?.role === 'admin' && (
+                    <option value="admin">Admin (Administrador Geral)</option>
+                  )}
+                </select>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  onClick={async () => {
+                    try {
+                      const { error } = await supabase
+                        .from('profiles')
+                        .update({ role: newRoleSelected })
+                        .eq('id', targetUserToManage.id);
+                        
+                      if (error) throw error;
+                      
+                      triggerToast(`Função de ${targetUserToManage.full_name} alterada para ${newRoleSelected}!`);
+                      
+                      // Update local pool members list
+                      setPoolMembers(prev => prev.map(m => {
+                        if (m.profiles?.id === targetUserToManage.id) {
+                          return {
+                            ...m,
+                            profiles: { ...m.profiles, role: newRoleSelected }
+                          };
+                        }
+                        return m;
+                      }));
+
+                      // If target user is the logged user, update global profile state
+                      if (targetUserToManage.id === session.user.id) {
+                        setProfile(prev => ({ ...prev, role: newRoleSelected }));
+                      }
+                      
+                      setIsManageModalOpen(false);
+                      setTargetUserToManage(null);
+                    } catch (err) {
+                      console.error(err);
+                      triggerToast('Erro ao atualizar função');
+                    }
+                  }}
+                  className="w-full bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-sm h-12 rounded-sm active:scale-95 transition-all flex items-center justify-center gap-1.5"
+                >
+                  <UserCheck className="w-4 h-4" />
+                  <span>SALVAR ALTERAÇÕES</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
