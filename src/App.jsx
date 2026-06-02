@@ -172,7 +172,9 @@ const usePlatform = () => {
 
 export default function App() {
   // Navigation & UI state
-  const [activeTab, setActiveTab] = useState('inicio'); // inicio, boloes, ranking, convites, perfil
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem('bolao_active_tab') || 'inicio';
+  }); // inicio, boloes, ranking, convites, perfil
   const [rankingTab, setRankingTab] = useState('classificacao'); // classificacao, simulador
   const [toastMessage, setToastMessage] = useState('');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -266,6 +268,11 @@ export default function App() {
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
   }, []);
+
+  // Sync activeTab to localStorage
+  useEffect(() => {
+    localStorage.setItem('bolao_active_tab', activeTab);
+  }, [activeTab]);
 
   // Auth Listener
   useEffect(() => {
@@ -413,6 +420,9 @@ export default function App() {
       }
     };
 
+    if (selectedPool) {
+      localStorage.setItem('bolao_selected_pool_id', selectedPool.id);
+    }
     loadPoolDetails();
   }, [selectedPool, session]);
 
@@ -532,7 +542,11 @@ export default function App() {
     setPools(loadedPools);
 
     if (loadedPools.length > 0) {
+      const savedPoolId = localStorage.getItem('bolao_selected_pool_id');
       setSelectedPool(prev => {
+        if (savedPoolId && loadedPools.some(p => p.id === savedPoolId)) {
+          return loadedPools.find(p => p.id === savedPoolId);
+        }
         if (prev && loadedPools.some(p => p.id === prev.id)) {
           return loadedPools.find(p => p.id === prev.id);
         }
