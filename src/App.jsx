@@ -33,6 +33,8 @@ import 'dayjs/locale/pt-br';
 
 dayjs.locale('pt-br');
 
+import LiveScoreWidget from './components/LiveScoreWidget';
+
 const translateTeam = (name) => {
   if (!name) return name;
   const dict = {
@@ -93,8 +95,8 @@ const translateTeam = (name) => {
   return dict[name] || name;
 };
 
-// Current simulated local time
-const CURRENT_TIME = new Date('2026-06-02T11:30:26-03:00');
+// Current local time
+const CURRENT_TIME = new Date();
 
 // Phase Multipliers and Labels
 const PHASE_MAP = {
@@ -259,6 +261,68 @@ export default function App() {
   const [historyGuesses, setHistoryGuesses] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
+  // Expanded guesses state (keyed by match ID)
+  const [expandedGuesses, setExpandedGuesses] = useState({});
+
+  const toggleGuessesExpansion = (matchId) => {
+    setExpandedGuesses(prev => ({
+      ...prev,
+      [matchId]: !prev[matchId]
+    }));
+  };
+
+  const renderParticipantGuesses = (matchId) => {
+    const match = matches.find(m => m.id === matchId);
+    if (!match) return null;
+    const locked = isMatchLocked(match.kickoff_time);
+    
+    if (!locked) {
+      return (
+        <div className="text-center p-2.5 bg-[#1D1D1D] rounded-sm border border-[#262626] text-[10px] text-neutral-400 mt-2">
+          🔒 Os palpites do grupo ficarão visíveis 15 minutos antes do início do jogo.
+        </div>
+      );
+    }
+
+    const otherMembersGuesses = poolMembers
+      .filter(m => m.profiles && m.profiles.id !== session.user.id)
+      .map(m => {
+        const guess = poolGuesses.find(g => g.user_id === m.profiles.id && g.match_id === matchId);
+        return {
+          profile: m.profiles,
+          guess: guess ? `${guess.home_guess} × ${guess.away_guess}` : 'Sem palpite'
+        };
+      });
+
+    if (otherMembersGuesses.length === 0) {
+      return (
+        <div className="text-center p-2 text-[10px] text-neutral-500 mt-2">
+          Não há outros participantes neste bolão.
+        </div>
+      );
+    }
+
+    return (
+      <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto pr-1">
+        {otherMembersGuesses.map(({ profile: p, guess }) => (
+          <div key={p.id} className="flex items-center justify-between bg-[#1D1D1D] p-2 rounded-sm border border-[#262626] text-[11px]">
+            <div className="flex items-center gap-1.5 truncate">
+              <div className="w-5 h-5 rounded bg-[#FF7A00]/20 text-[#FF7A00] flex items-center justify-center font-bold text-[9px] overflow-hidden shrink-0 border border-[#FF7A00]/10">
+                {p.avatar_url ? (
+                  <img src={p.avatar_url} alt={p.full_name} className="w-full h-full object-cover" />
+                ) : (
+                  p.full_name.charAt(0).toUpperCase()
+                )}
+              </div>
+              <span className="font-semibold text-white truncate max-w-[120px]">{p.full_name}</span>
+            </div>
+            <span className="font-bold text-[#FF7A00] px-1.5 py-0.5 bg-[#262626] rounded-sm">{guess}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const triggerToast = (msg) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 3000);
@@ -311,6 +375,58 @@ export default function App() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Realtime subscription for matches and guesses
+  useEffect(() => {
+    if (!session) return;
+
+    const matchesChannel = supabase
+      .channel('realtime-matches')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'matches' },
+        (payload) => {
+          if (payload.eventType === 'UPDATE') {
+            setMatches(prev => prev.map(m => m.id === payload.new.id ? payload.new : m));
+          } else if (payload.eventType === 'INSERT') {
+            setMatches(prev => [...prev, payload.new].sort((a, b) => new Date(a.kickoff_time) - new Date(b.kickoff_time)));
+          } else if (payload.eventType === 'DELETE') {
+            setMatches(prev => prev.filter(m => m.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+
+    const guessesChannel = supabase
+      .channel('realtime-guesses')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'guesses' },
+        (payload) => {
+          if (!selectedPool) return;
+          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+            if (payload.new.pool_id === selectedPool.id) {
+              setPoolGuesses(prev => {
+                const exists = prev.some(g => g.id === payload.new.id);
+                if (exists) {
+                  return prev.map(g => g.id === payload.new.id ? payload.new : g);
+                } else {
+                  return [...prev, payload.new];
+                }
+              });
+            }
+          } else if (payload.eventType === 'DELETE') {
+            setPoolGuesses(prev => prev.filter(g => g.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(matchesChannel);
+      supabase.removeChannel(guessesChannel);
+    };
+  }, [session, selectedPool]);
 
   // Fetch / Seed profile and load matches/pools on session state
   useEffect(() => {
@@ -917,6 +1033,54 @@ export default function App() {
       triggerToast('Erro ao registrar classificado.');
     }
   };
+  // Sincronização automática dos placares usando a API gratuita de worldcup26.ir
+  useEffect(() => {
+    if (matches.length === 0) return;
+
+    const syncScores = async () => {
+      try {
+        const res = await fetch('https://worldcup26.ir/get/games');
+        if (!res.ok) throw new Error('Falha ao buscar placares da API');
+        const data = await res.json();
+        
+        if (data && Array.isArray(data.games)) {
+          setMatches(prevMatches => {
+            return prevMatches.map(m => {
+              // Encontra o jogo correspondente na API por nome das equipes
+              const apiGame = data.games.find(g => 
+                (g.home_team_name_en?.toLowerCase() === m.home_team?.toLowerCase() &&
+                 g.away_team_name_en?.toLowerCase() === m.away_team?.toLowerCase()) ||
+                (g.home_team_name_en?.toLowerCase() === m.away_team?.toLowerCase() &&
+                 g.away_team_name_en?.toLowerCase() === m.home_team?.toLowerCase())
+              );
+
+              if (apiGame) {
+                const homeScore = apiGame.home_score !== null && apiGame.home_score !== 'null' ? parseInt(apiGame.home_score, 10) : null;
+                const awayScore = apiGame.away_score !== null && apiGame.away_score !== 'null' ? parseInt(apiGame.away_score, 10) : null;
+                const isFinished = apiGame.finished?.toUpperCase() === 'TRUE';
+                
+                // Retorna o match atualizado localmente
+                return {
+                  ...m,
+                  home_score: homeScore,
+                  away_score: awayScore,
+                  is_finished: isFinished
+                };
+              }
+              return m;
+            });
+          });
+        }
+      } catch (err) {
+        console.error('Erro na sincronização de placares:', err);
+      }
+    };
+
+    // Roda uma vez imediatamente e depois a cada 30 segundos
+    syncScores();
+    const interval = setInterval(syncScores, 30000);
+    return () => clearInterval(interval);
+  }, [matches.length]);
 
   // Helper to handle incrementing/decrementing simulated scores
   const handleSimulatedScoreChange = (matchId, side, action) => {
@@ -981,7 +1145,9 @@ export default function App() {
         if (!guess) return;
         const pred = [guess.home_guess, guess.away_guess];
         
-        if (match.is_finished) {
+        const isLive = !match.is_finished && new Date(match.kickoff_time) <= new Date();
+
+        if (match.is_finished || isLive) {
           totalPoints += calculatePointsForPrediction(
             pred[0], pred[1],
             match.home_score ?? 0, match.away_score ?? 0,
@@ -1309,6 +1475,69 @@ export default function App() {
                 </select>
               </div>
             )}
+
+            {/* Live Match Card */}
+            {(() => {
+              const liveMatches = matches.filter(match => !match.is_finished && new Date(match.kickoff_time) <= new Date());
+              if (liveMatches.length === 0) return null;
+              
+              return (
+                <div className="space-y-3">
+                  <h3 className="text-sm font-semibold uppercase text-neutral-400 tracking-widest flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 bg-[#FF4D4D] rounded-full animate-pulse shadow-[0_0_8px_#FF4D4D]"></span>
+                    <span>Jogos Ao Vivo</span>
+                  </h3>
+                  {liveMatches.map(match => {
+                    const pred = userPredictions[match.id];
+                    return (
+                      <div key={match.id} className="bg-gradient-to-r from-[#1A0A0A] to-[#151515] border border-red-900/30 rounded-md p-4 shadow-lg relative overflow-hidden transition-all duration-300 hover:border-red-950/60">
+                        {/* Status bar */}
+                        <div className="flex justify-between items-center mb-3">
+                          <span className="text-[10px] bg-[#FF4D4D] text-black font-black px-2 py-0.5 rounded-sm uppercase tracking-widest flex items-center gap-1.5 shadow-[0_0_8px_rgba(255,77,77,0.4)]">
+                            <span className="w-1.5 h-1.5 bg-black rounded-full animate-pulse"></span>
+                            Em Andamento
+                          </span>
+                          <span className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">
+                            {PHASE_MAP[match.phase]?.label || match.phase}
+                          </span>
+                        </div>
+
+                        {/* Match Score Display */}
+                        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 py-2">
+                          <div className="flex flex-col items-center gap-1 text-center overflow-hidden">
+                            <ImageWithFallback src={match.home_team_crest} alt={match.home_team} />
+                            <span className="text-xs font-bold text-white leading-tight truncate w-full">{translateTeam(match.home_team)}</span>
+                          </div>
+
+                          <div className="flex items-center gap-3 px-3 py-1.5 bg-[#151515]/80 rounded border border-[#262626]">
+                            <span className="text-2xl font-black text-white">{match.home_score ?? 0}</span>
+                            <span className="text-neutral-600 font-bold text-sm">×</span>
+                            <span className="text-2xl font-black text-white">{match.away_score ?? 0}</span>
+                          </div>
+
+                          <div className="flex flex-col items-center gap-1 text-center overflow-hidden">
+                            <ImageWithFallback src={match.away_team_crest} alt={match.away_team} />
+                            <span className="text-xs font-bold text-white leading-tight truncate w-full">{translateTeam(match.away_team)}</span>
+                          </div>
+                        </div>
+
+                        {/* User Guess info */}
+                        <div className="mt-3 pt-3 border-t border-[#262626]/60 flex items-center justify-between text-xs">
+                          <span className="text-neutral-400 font-semibold">Seu Palpite:</span>
+                          {pred ? (
+                            <span className="font-bold text-[#FF7A00] bg-[#1D1D1D] px-2.5 py-1 rounded border border-[#262626]">
+                              {pred.home} × {pred.away}
+                            </span>
+                          ) : (
+                            <span className="text-neutral-500 italic">Sem palpite registrado</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
 
             {/* Featured Pool Card ("Seu Melhor Bolão") */}
             <div>
@@ -1703,6 +1932,15 @@ export default function App() {
                                       <p className="text-[10px] text-neutral-500">
                                         {locked ? 'Palpites encerrados.' : 'Palpite editável.'}
                                       </p>
+
+                                      <button
+                                        onClick={() => toggleGuessesExpansion(match.id)}
+                                        className="w-full mt-2 py-1 bg-[#1D1D1D] hover:bg-[#262626] border border-[#262626] rounded-sm text-[9px] font-bold text-neutral-400 hover:text-white transition-all flex items-center justify-center gap-1 focus:outline-none"
+                                      >
+                                        <span>👥 Palpites do grupo</span>
+                                        <span>{expandedGuesses[match.id] ? '▲' : '▼'}</span>
+                                      </button>
+                                      {expandedGuesses[match.id] && renderParticipantGuesses(match.id)}
                                     </div>
                                   </div>
                                 );
@@ -1832,6 +2070,15 @@ export default function App() {
                                         </div>
                                       </div>
                                     )}
+                                    
+                                    <button
+                                      onClick={() => toggleGuessesExpansion(match.id)}
+                                      className="w-full mt-2.5 py-1.5 bg-[#1D1D1D] hover:bg-[#262626] border border-[#262626] rounded-sm text-[9px] font-bold text-neutral-400 hover:text-white transition-all flex items-center justify-center gap-1 focus:outline-none"
+                                    >
+                                      <span>👥 Palpites do grupo</span>
+                                      <span>{expandedGuesses[match.id] ? '▲' : '▼'}</span>
+                                    </button>
+                                    {expandedGuesses[match.id] && renderParticipantGuesses(match.id)}
                                   </div>
                                 );
                               })}
@@ -1848,6 +2095,9 @@ export default function App() {
                 </div>
               );
             })()}
+
+            {/* Live Score Widget Embed */}
+            <LiveScoreWidget />
 
             {/* Quick Link Footer */}
             {selectedPool && (
