@@ -108,6 +108,80 @@ const PHASE_MAP = {
   final: { label: 'Final', mult: 10 },
 };
 
+const TEAM_TO_GROUP = {
+  // Grupo A
+  'Mexico': 'Grupo A', 'México': 'Grupo A',
+  'South Africa': 'Grupo A', 'África do Sul': 'Grupo A',
+  'South Korea': 'Grupo A', 'Coreia do Sul': 'Grupo A',
+  'Czech Republic': 'Grupo A', 'Czechia': 'Grupo A', 'República Tcheca': 'Grupo A',
+
+  // Grupo B
+  'Canada': 'Grupo B', 'Canadá': 'Grupo B',
+  'Bosnia and Herzegovina': 'Grupo B', 'Bosnia-Herzegovina': 'Grupo B', 'Bósnia e Herzegovina': 'Grupo B',
+  'Qatar': 'Grupo B', 'Catar': 'Grupo B',
+  'Switzerland': 'Grupo B', 'Suíça': 'Grupo B',
+
+  // Grupo C
+  'Brazil': 'Grupo C', 'Brasil': 'Grupo C',
+  'Morocco': 'Grupo C', 'Marrocos': 'Grupo C',
+  'Haiti': 'Grupo C',
+  'Scotland': 'Grupo C', 'Escócia': 'Grupo C',
+
+  // Grupo D
+  'United States': 'Grupo D', 'USA': 'Grupo D', 'Estados Unidos': 'Grupo D',
+  'Paraguay': 'Grupo D', 'Paraguai': 'Grupo D',
+  'Australia': 'Grupo D', 'Austrália': 'Grupo D',
+  'Turkey': 'Grupo D', 'Turquia': 'Grupo D',
+
+  // Grupo E
+  'Germany': 'Grupo E', 'Alemanha': 'Grupo E',
+  'Curaçao': 'Grupo E', 'Curacao': 'Grupo E',
+  'Ivory Coast': 'Grupo E', 'Costa do Marfim': 'Grupo E',
+  'Ecuador': 'Grupo E', 'Equador': 'Grupo E',
+
+  // Grupo F
+  'Netherlands': 'Grupo F', 'Holanda': 'Grupo F',
+  'Japan': 'Grupo F', 'Japão': 'Grupo F',
+  'Sweden': 'Grupo F', 'Suécia': 'Grupo F',
+  'Tunisia': 'Grupo F', 'Tunísia': 'Grupo F',
+
+  // Grupo G
+  'Belgium': 'Grupo G', 'Bélgica': 'Grupo G',
+  'Egypt': 'Grupo G', 'Egito': 'Grupo G',
+  'Iran': 'Grupo G', 'Irã': 'Grupo G',
+  'New Zealand': 'Grupo G', 'Nova Zelândia': 'Grupo G',
+
+  // Grupo H
+  'Spain': 'Grupo H', 'Espanha': 'Grupo H',
+  'Cape Verde Islands': 'Grupo H', 'Cape Verde': 'Grupo H', 'Cabo Verde': 'Grupo H',
+  'Saudi Arabia': 'Grupo H', 'Arábia Saudita': 'Grupo H',
+  'Uruguay': 'Grupo H', 'Uruguai': 'Grupo H',
+
+  // Grupo I
+  'France': 'Grupo I', 'França': 'Grupo I',
+  'Senegal': 'Grupo I',
+  'Iraq': 'Grupo I', 'Iraque': 'Grupo I',
+  'Norway': 'Grupo I', 'Noruega': 'Grupo I',
+
+  // Grupo J
+  'Argentina': 'Grupo J',
+  'Algeria': 'Grupo J', 'Argélia': 'Grupo J',
+  'Austria': 'Grupo J', 'Áustria': 'Grupo J',
+  'Jordan': 'Grupo J', 'Jordânia': 'Grupo J',
+
+  // Grupo K
+  'Portugal': 'Grupo K',
+  'Congo DR': 'Grupo K', 'RD do Congo': 'Grupo K',
+  'Uzbekistan': 'Grupo K', 'Uzbequistão': 'Grupo K',
+  'Colombia': 'Grupo K', 'Colômbia': 'Grupo K',
+
+  // Grupo L
+  'England': 'Grupo L', 'Inglaterra': 'Grupo L',
+  'Croatia': 'Grupo L', 'Croácia': 'Grupo L',
+  'Ghana': 'Grupo L', 'Gana': 'Grupo L',
+  'Panama': 'Grupo L', 'Panamá': 'Grupo L',
+};
+
 function ImageWithFallback({ src, alt }) {
   const [error, setError] = useState(!src);
   
@@ -201,9 +275,16 @@ export default function App() {
   const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
   const [newPoolName, setNewPoolName] = useState('');
   const [newPoolFee, setNewPoolFee] = useState('');
+  const [newPoolMode, setNewPoolMode] = useState('total'); // total, round
+  const [newPoolIsPrivate, setNewPoolIsPrivate] = useState(true); // true = private/convite, false = public/libre
+  const [isBrowseModalOpen, setIsBrowseModalOpen] = useState(false);
+  const [publicPools, setPublicPools] = useState([]);
+  const [browseLoading, setBrowseLoading] = useState(false);
   const [pushReminder, setPushReminder] = useState(true);
   const carouselItemRefs = React.useRef({});
   const [isListExpanded, setIsListExpanded] = useState(false);
+  const [selectedPhaseFilter, setSelectedPhaseFilter] = useState('all');
+  const [hasInitializedFilter, setHasInitializedFilter] = useState(false);
   const platform = usePlatform();
   const matchSectionRef = React.useRef(null);
 
@@ -263,6 +344,139 @@ export default function App() {
 
   // Expanded guesses state (keyed by match ID)
   const [expandedGuesses, setExpandedGuesses] = useState({});
+
+  const categorizedMatches = React.useMemo(() => {
+    // 1. Filter WC 2026 matches with valid kickoff times
+    const wcMatches = (matches || []).filter(match => {
+      if (!match.kickoff_time) return false;
+      const kickoff = dayjs(match.kickoff_time);
+      return kickoff.isValid() && kickoff.year() === 2026 && (kickoff.month() >= 4 && kickoff.month() <= 6);
+    });
+
+    // 2. Sort chronologically first to determine group rounds correctly per team
+    const sortedTimeline = [...wcMatches].sort((a, b) => new Date(a.kickoff_time) - new Date(b.kickoff_time));
+
+    // 3. Map each match to its detailed info (computing round and group)
+    const teamCounts = {};
+    const mapped = sortedTimeline.map(match => {
+      let phaseKey = match.phase;
+      let phaseLabel = 'Fases Eliminatórias (Mata-Mata)';
+      let subphaseLabel = '';
+      let groupName = '';
+
+      if (match.id === 537389 || match.phase === 'third_place' || (match.phase === 'final' && match.kickoff_time?.includes('2026-07-18')) || (match.phase === 'groups' && match.kickoff_time?.includes('2026-07-18'))) {
+        phaseKey = 'third_place';
+        subphaseLabel = 'Disputa de Terceiro Lugar';
+      } else if (match.phase === 'groups') {
+        phaseLabel = 'Fase de Grupos (Primeira Fase)';
+        const home = match.home_team;
+        const away = match.away_team;
+        teamCounts[home] = (teamCounts[home] || 0) + 1;
+        teamCounts[away] = (teamCounts[away] || 0) + 1;
+        const round = Math.max(teamCounts[home], teamCounts[away]);
+        
+        phaseKey = `groups_r${round}`;
+        groupName = TEAM_TO_GROUP[home] || TEAM_TO_GROUP[away] || 'Grupo Indefinido';
+        subphaseLabel = `${round}ª Rodada - ${groupName}`;
+      } else if (match.phase === 'round_of_32') {
+        subphaseLabel = 'Segunda Fase (Dezesseis-avos de Final)';
+      } else if (match.phase === 'round_of_16') {
+        subphaseLabel = 'Oitavas de Final';
+      } else if (match.phase === 'quarter_finals') {
+        subphaseLabel = 'Quartas de Final';
+      } else if (match.phase === 'semi_finals') {
+        subphaseLabel = 'Semifinal';
+      } else if (match.phase === 'final') {
+        subphaseLabel = 'Final';
+      }
+
+      return {
+        ...match,
+        phaseKey,
+        phaseLabel,
+        subphaseLabel,
+        groupName
+      };
+    });
+
+    // 4. Sort the categorized matches so they are ordered by phase, then by group alphabetically, then by date
+    const phaseOrder = {
+      'groups_r1': 1,
+      'groups_r2': 2,
+      'groups_r3': 3,
+      'round_of_32': 4,
+      'round_of_16': 5,
+      'quarter_finals': 6,
+      'semi_finals': 7,
+      'third_place': 8,
+      'final': 9
+    };
+
+    return mapped.sort((a, b) => {
+      const orderA = phaseOrder[a.phaseKey] || 99;
+      const orderB = phaseOrder[b.phaseKey] || 99;
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
+      
+      // If same group round, sort by group name alphabetically (A to L)
+      if (a.phase === 'groups' && b.phase === 'groups') {
+        const groupA = a.groupName || '';
+        const groupB = b.groupName || '';
+        if (groupA !== groupB) {
+          return groupA.localeCompare(groupB);
+        }
+      }
+      
+      // Otherwise sort by kickoff time
+      return new Date(a.kickoff_time) - new Date(b.kickoff_time);
+    });
+  }, [matches]);
+
+  const filteredMatches = React.useMemo(() => {
+    if (selectedPhaseFilter === 'all') {
+      return categorizedMatches;
+    }
+    return categorizedMatches.filter(m => m.phaseKey === selectedPhaseFilter);
+  }, [categorizedMatches, selectedPhaseFilter]);
+
+  const groupedMatches = React.useMemo(() => {
+    const groups = [];
+    let currentLabel = '';
+    let currentGroup = null;
+
+    filteredMatches.forEach(m => {
+      const label = m.subphaseLabel || PHASE_MAP[m.phase]?.label || m.phase;
+      if (label !== currentLabel) {
+        currentLabel = label;
+        currentGroup = { label, matches: [] };
+        groups.push(currentGroup);
+      }
+      currentGroup.matches.push(m);
+    });
+
+    return groups;
+  }, [filteredMatches]);
+
+  // Set default selected phase filter to the next upcoming or live match
+  useEffect(() => {
+    if (matches && matches.length > 0 && !hasInitializedFilter) {
+      const liveMatch = categorizedMatches.find(m => !m.is_finished && isMatchLocked(m.kickoff_time));
+      const nextPredictable = categorizedMatches.find(m => !m.is_finished && !isMatchLocked(m.kickoff_time));
+      const unfinished = categorizedMatches.find(m => !m.is_finished);
+      const targetPhase = (liveMatch || nextPredictable || unfinished || categorizedMatches[categorizedMatches.length - 1])?.phaseKey;
+      
+      if (targetPhase) {
+        setSelectedPhaseFilter(targetPhase);
+        setHasInitializedFilter(true);
+      }
+    }
+  }, [matches, categorizedMatches, hasInitializedFilter]);
+
+  // Reset filter initialization when pool changes
+  useEffect(() => {
+    setHasInitializedFilter(false);
+  }, [selectedPool]);
 
   const toggleGuessesExpansion = (matchId) => {
     setExpandedGuesses(prev => ({
@@ -576,10 +790,10 @@ export default function App() {
     if (!selectedPool || !session) return;
 
     const loadPoolDetails = async () => {
-      // Fetch pool members
+       // Fetch pool members
       const { data: members, error: membersErr } = await supabase
         .from('pool_members')
-        .select('joined_at, profiles(*)')
+        .select('joined_at, role, profiles(*)')
         .eq('pool_id', selectedPool.id);
 
       if (membersErr) {
@@ -619,30 +833,42 @@ export default function App() {
 
   const loadPendingApprovals = async () => {
     if (!session || !profile) return;
-    const userRole = profile.role || 'user';
-    if (userRole === 'user') {
-      setPendingApprovals([]);
-      return;
-    }
 
-    const { data: myPools } = await supabase
+    // Fetch pools owned by the user
+    const { data: ownedPools } = await supabase
+      .from('pools')
+      .select('id')
+      .eq('owner_id', session.user.id);
+    
+    const ownedIds = ownedPools?.map(p => p.id) || [];
+
+    // Fetch pools where user has 'admin' role in pool_members
+    const { data: adminMemberships } = await supabase
       .from('pool_members')
       .select('pool_id')
       .eq('user_id', session.user.id)
+      .eq('role', 'admin')
       .eq('is_approved', true);
 
-    const poolIds = myPools?.map(mp => mp.pool_id) || [];
-    if (poolIds.length === 0) {
-      setPendingApprovals([]);
-      return;
-    }
+    const adminIds = adminMemberships?.map(m => m.pool_id) || [];
 
-    const { data: pendings, error } = await supabase
+    const managePoolIds = Array.from(new Set([...ownedIds, ...adminIds]));
+    const isGlobalAdmin = profile.role === 'admin';
+
+    let query = supabase
       .from('pool_members')
       .select('pool_id, user_id, joined_at, pools(name), profiles(full_name)')
-      .in('pool_id', poolIds)
       .eq('is_approved', false);
 
+    if (!isGlobalAdmin) {
+      if (managePoolIds.length === 0) {
+        setPendingApprovals([]);
+        return;
+      }
+      query = query.in('pool_id', managePoolIds);
+    }
+
+    const { data: pendings, error } = await query;
     if (error) {
       console.error('Error fetching pending approvals:', error);
     } else {
@@ -666,7 +892,6 @@ export default function App() {
       triggerToast('Erro ao aprovar membro.');
     }
   };
-
   const handleRejectMember = async (poolId, userId) => {
     try {
       const { error } = await supabase
@@ -681,6 +906,34 @@ export default function App() {
     } catch (err) {
       console.error(err);
       triggerToast('Erro ao recusar solicitação.');
+    }
+  };
+
+  const handleRemoveMember = async (poolId, userId) => {
+    if (userId === selectedPool?.owner_id) {
+      triggerToast('O criador do bolão não pode ser removido.');
+      return;
+    }
+
+    const confirmRemove = window.confirm('Tem certeza que deseja remover este participante do bolão?');
+    if (!confirmRemove) return;
+
+    try {
+      const { error } = await supabase
+        .from('pool_members')
+        .delete()
+        .eq('pool_id', poolId)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+      triggerToast('Participante removido do bolão.');
+      
+      setPoolMembers(prev => prev.filter(m => m.profiles?.id !== userId));
+      setIsManageModalOpen(false);
+      setTargetUserToManage(null);
+    } catch (err) {
+      console.error(err);
+      triggerToast('Erro ao remover participante.');
     }
   };
 
@@ -962,7 +1215,7 @@ export default function App() {
     if (isNaN(val)) val = 0;
     
     if (action === 'inc') {
-      val = Math.min(val + 1, 20);
+      val = Math.min(val + 1, 99);
     }
     if (action === 'dec') {
       val = Math.max(val - 1, 0);
@@ -973,10 +1226,18 @@ export default function App() {
       [side]: val
     };
 
+    // Strict sanitization & validation
+    const cleanHome = parseInt(updatedPred.home, 10);
+    const cleanAway = parseInt(updatedPred.away, 10);
+    if (isNaN(cleanHome) || isNaN(cleanAway) || cleanHome < 0 || cleanHome > 99 || cleanAway < 0 || cleanAway > 99) {
+      triggerToast('Valores de palpite inválidos. Devem ser inteiros entre 0 e 99.');
+      return;
+    }
+
     // Optimistic UI update
     setUserPredictions(prev => ({
       ...prev,
-      [matchId]: updatedPred
+      [matchId]: { home: cleanHome, away: cleanAway }
     }));
 
     try {
@@ -988,8 +1249,8 @@ export default function App() {
             user_id: session.user.id,
             match_id: matchId,
             pool_id: pool.id,
-            home_guess: updatedPred.home,
-            away_guess: updatedPred.away
+            home_guess: cleanHome,
+            away_guess: cleanAway
           }, { onConflict: 'user_id,match_id,pool_id' });
       });
       await Promise.all(upsertPromises);
@@ -1015,6 +1276,14 @@ export default function App() {
     // Toggle off if clicking same pick
     const newPick = tiebreakerPicks[matchId] === pick ? null : pick;
 
+    // Strict sanitization & validation of current scores
+    const cleanHome = parseInt(userPredictions[matchId]?.home ?? 0, 10);
+    const cleanAway = parseInt(userPredictions[matchId]?.away ?? 0, 10);
+    if (isNaN(cleanHome) || isNaN(cleanAway) || cleanHome < 0 || cleanHome > 99 || cleanAway < 0 || cleanAway > 99) {
+      triggerToast('Palpites inválidos para a disputa.');
+      return;
+    }
+
     // Optimistic UI update
     setTiebreakerPicks(prev => ({ ...prev, [matchId]: newPick }));
 
@@ -1026,8 +1295,8 @@ export default function App() {
             user_id: session.user.id,
             match_id: matchId,
             pool_id: pool.id,
-            home_guess: userPredictions[matchId]?.home ?? 0,
-            away_guess: userPredictions[matchId]?.away ?? 0,
+            home_guess: cleanHome,
+            away_guess: cleanAway,
             tiebreaker_pick: newPick
           }, { onConflict: 'user_id,match_id,pool_id' })
       );
@@ -1110,6 +1379,18 @@ export default function App() {
   const getStandings = () => {
     if (!selectedPool) return [];
 
+    // Determine target phase for round-based pools
+    const activePhaseKey = (() => {
+      const liveMatch = categorizedMatches.find(m => !m.is_finished && isMatchLocked(m.kickoff_time));
+      const nextPredictable = categorizedMatches.find(m => !m.is_finished && !isMatchLocked(m.kickoff_time));
+      const unfinished = categorizedMatches.find(m => !m.is_finished);
+      return (liveMatch || nextPredictable || unfinished || categorizedMatches[categorizedMatches.length - 1])?.phaseKey || 'groups_r1';
+    })();
+
+    const targetPhase = selectedPool.mode === 'round'
+      ? (selectedPhaseFilter === 'all' ? activePhaseKey : selectedPhaseFilter)
+      : null;
+
     const updatedParticipants = poolMembers.map(m => {
       const pProfile = m.profiles;
       if (!pProfile) return null;
@@ -1117,6 +1398,20 @@ export default function App() {
       let totalPoints = 0;
       
       matches.forEach(match => {
+        // O participante que entrar em um bolão em andamento entra zerado de pontos 
+        // e só começa pontuar nas partidas posteriores de seu palpite
+        if (m.joined_at && new Date(match.kickoff_time) < new Date(m.joined_at)) {
+          return;
+        }
+
+        // If it's a round-based pool, verify the match belongs to the targeted phase
+        if (selectedPool.mode === 'round') {
+          const mappedMatch = categorizedMatches.find(cm => cm.id === match.id);
+          if (!mappedMatch || mappedMatch.phaseKey !== targetPhase) {
+            return;
+          }
+        }
+
         // Find guess for this participant
         const guess = poolGuesses.find(g => g.user_id === pProfile.id && g.match_id === match.id);
         if (!guess) return;
@@ -1157,7 +1452,21 @@ export default function App() {
     }).filter(Boolean);
 
     // Sort by points descending
-    return updatedParticipants.sort((a, b) => b.points - a.points);
+    const sorted = updatedParticipants.sort((a, b) => b.points - a.points);
+
+    // Compute ranks with standard competition ranking (1224 style)
+    let currentRank = 1;
+    let previousPoints = null;
+    return sorted.map((p, idx) => {
+      if (p.points !== previousPoints) {
+        currentRank = idx + 1;
+      }
+      previousPoints = p.points;
+      return {
+        ...p,
+        rank: currentRank
+      };
+    });
   };
 
   const standings = getStandings();
@@ -1169,12 +1478,7 @@ export default function App() {
 
     const userRole = profile.role || 'user';
 
-    if (userRole === 'user') {
-      triggerToast('Apenas usuários Premium ou Admin podem criar bolões.');
-      return;
-    }
-
-    if (userRole === 'premium') {
+    if (userRole !== 'admin') {
       const { count, error: countErr } = await supabase
         .from('pools')
         .select('*', { count: 'exact', head: true })
@@ -1187,7 +1491,7 @@ export default function App() {
       }
 
       if (count && count >= 1) {
-        triggerToast('Limite de 1 bolão atingido para contas Premium!');
+        triggerToast('Limite de 1 bolão atingido para contas Premium/Padrão!');
         return;
       }
     }
@@ -1200,6 +1504,7 @@ export default function App() {
     }
 
     const feeVal = newPoolFee ? parseFloat(newPoolFee) : 0;
+    const isPrivate = feeVal > 0 ? newPoolIsPrivate : false; // Force public if free entry
 
     try {
       const { data: newPool, error: poolError } = await supabase
@@ -1208,7 +1513,9 @@ export default function App() {
           name: newPoolName,
           owner_id: session.user.id,
           entry_fee: feeVal,
-          invite_code: randomLink
+          invite_code: randomLink,
+          mode: newPoolMode,
+          is_private: isPrivate
         })
         .select()
         .single();
@@ -1228,6 +1535,8 @@ export default function App() {
 
       setNewPoolName('');
       setNewPoolFee('');
+      setNewPoolMode('total');
+      setNewPoolIsPrivate(true);
       setIsCreateModalOpen(false);
       triggerToast(`Bolão "${newPool.name}" criado com sucesso!`);
       
@@ -1276,18 +1585,99 @@ export default function App() {
         .insert({
           pool_id: pool.id,
           user_id: session.user.id,
-          is_approved: false
+          is_approved: !pool.is_private
         });
 
       if (joinError) throw joinError;
 
-      triggerToast(`Solicitação enviada para "${pool.name}"! Aguarde aprovação de um membro Premium/Admin.`);
+      if (!pool.is_private) {
+        triggerToast(`Você entrou no bolão "${pool.name}"!`);
+      } else {
+        triggerToast(`Solicitação enviada para "${pool.name}"! Aguarde aprovação de um membro Premium/Admin.`);
+      }
       setInviteCodeInput('');
       await loadPoolsData();
       setActiveTab('boloes');
     } catch (err) {
       console.error(err);
       triggerToast('Erro ao entrar no bolão.');
+    }
+  };
+
+  const loadPublicPools = async () => {
+    if (!session) return;
+    setBrowseLoading(true);
+    try {
+      const { data: myMemberships } = await supabase
+        .from('pool_members')
+        .select('pool_id')
+        .eq('user_id', session.user.id);
+
+      const myPoolIds = myMemberships?.map(m => m.pool_id) || [];
+
+      let query = supabase
+        .from('pools')
+        .select('*')
+        .eq('is_private', false);
+
+      if (myPoolIds.length > 0) {
+        query = query.not('id', 'in', `(${myPoolIds.join(',')})`);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const poolIds = data?.map(p => p.id) || [];
+      const counts = {};
+      if (poolIds.length > 0) {
+        const { data: memberData } = await supabase
+          .from('pool_members')
+          .select('pool_id')
+          .in('pool_id', poolIds)
+          .eq('is_approved', true);
+
+        if (memberData) {
+          memberData.forEach(m => {
+            counts[m.pool_id] = (counts[m.pool_id] || 0) + 1;
+          });
+        }
+      }
+
+      const mapped = data?.map(p => ({
+        ...p,
+        participant_count: counts[p.id] || 0
+      })) || [];
+
+      setPublicPools(mapped);
+    } catch (err) {
+      console.error('Error loading public pools:', err);
+      triggerToast('Erro ao carregar bolões livres.');
+    } finally {
+      setBrowseLoading(false);
+    }
+  };
+
+  const handleJoinPublicPool = async (pool) => {
+    if (!session) return;
+    const confirmJoin = window.confirm(`Deseja entrar no bolão livre "${pool.name}"?`);
+    if (!confirmJoin) return;
+
+    try {
+      const { error } = await supabase
+        .from('pool_members')
+        .insert({
+          pool_id: pool.id,
+          user_id: session.user.id,
+          is_approved: true
+        });
+
+      if (error) throw error;
+      triggerToast(`Você entrou no bolão "${pool.name}"!`);
+      setIsBrowseModalOpen(false);
+      await loadPoolsData();
+    } catch (err) {
+      console.error(err);
+      triggerToast('Erro ao entrar no bolão livre.');
     }
   };
 
@@ -1557,9 +1947,9 @@ export default function App() {
                       <p className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider mb-2">Pódio Provisório</p>
                       <div className="grid grid-cols-3 gap-2">
                         {standings.slice(0, 3).map((item, idx) => (
-                          <div key={item.id} className={`bg-[#1D1D1D] p-2 rounded-sm text-center relative ${idx === 0 ? 'border-l-2 border-[#FF7A00]' : ''}`}>
-                            {idx === 0 && <span className="absolute -top-1 -right-1 text-[10px]">👑</span>}
-                            <p className="text-[10px] text-neutral-400 truncate">{idx + 1}º {item.name}</p>
+                          <div key={item.id} className={`bg-[#1D1D1D] p-2 rounded-sm text-center relative ${item.rank === 1 ? 'border-l-2 border-[#FF7A00]' : ''}`}>
+                            {item.rank === 1 && <span className="absolute -top-1 -right-1 text-[10px]">👑</span>}
+                            <p className="text-[10px] text-neutral-400 truncate">{item.rank}º {item.name}</p>
                             <p className="text-xs font-bold text-white mt-0.5">{item.points} pts</p>
                           </div>
                         ))}
@@ -1658,13 +2048,7 @@ export default function App() {
 
             {/* Upcoming Matches Section */}
             {selectedPool && (() => {
-              const activeMatches = matches.filter(match => {
-                const isTbd = isTbdMatch(match);
-                const kickoff = dayjs(match.kickoff_time);
-                // World Cup 2026: June 11 – July 19, 2026 (months 4=May, 5=June, 6=July in 0-index)
-                const isWorldCup2026 = kickoff.year() === 2026 && (kickoff.month() >= 4 && kickoff.month() <= 6);
-                return !isTbd && isWorldCup2026;
-              });
+              const activeMatches = categorizedMatches.filter(m => !isTbdMatch(m));
 
               return (
                 <div className="space-y-4">
@@ -1689,6 +2073,15 @@ export default function App() {
                           onClick={() => {
                             const next = !isListExpanded;
                             setIsListExpanded(next);
+                            if (next) {
+                              const liveMatch = categorizedMatches.find(m => !m.is_finished && isMatchLocked(m.kickoff_time));
+                              const nextPredictable = categorizedMatches.find(m => !m.is_finished && !isMatchLocked(m.kickoff_time));
+                              const unfinished = categorizedMatches.find(m => !m.is_finished);
+                              const targetPhase = (liveMatch || nextPredictable || unfinished || categorizedMatches[categorizedMatches.length - 1])?.phaseKey;
+                              if (targetPhase) {
+                                setSelectedPhaseFilter(targetPhase);
+                              }
+                            }
                             triggerToast(next ? "Visualizando em Lista" : "Visualizando em Carrossel");
                             // Scroll the toggle bar to top of viewport for better UX
                             setTimeout(() => {
@@ -1909,162 +2302,202 @@ export default function App() {
                               animate={{ opacity: 1, y: 0 }}
                               exit={{ opacity: 0, y: -30 }}
                               transition={{ duration: 0.25 }}
-                              className="space-y-3"
+                              className="space-y-5"
                             >
-                              {activeMatches.map(match => {
-                                const locked = isMatchLocked(match.kickoff_time);
-                                const tbd = isTbdMatch(match);
-                                const pred = userPredictions[match.id] || { home: 0, away: 0 };
-                                const kickoffDate = new Date(match.kickoff_time);
-                                const dateFormatted = kickoffDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-                                const timeFormatted = kickoffDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-                                const isKnockout = match.phase !== 'groups';
-                                const isDrawPred = pred.home === pred.away;
-                                const showTiebreaker = isKnockout && isDrawPred && !locked && !tbd;
-                                const tiePick = tiebreakerPicks[match.id] || null;
-
-                                return (
-                                  <div 
-                                    key={match.id} 
-                                    className={`bg-[#151515] border border-[#262626] rounded-md p-3.5 shadow-card transition-opacity duration-200 ${tbd ? 'opacity-50' : ''}`}
+                              {/* Phase Filter Chips */}
+                              <div className="flex gap-2 overflow-x-auto pb-3 pt-1 no-scrollbar -mx-4 px-4 scroll-smooth">
+                                {[
+                                  { id: 'all', label: 'Todos' },
+                                  { id: 'groups_r1', label: '1ª Rodada' },
+                                  { id: 'groups_r2', label: '2ª Rodada' },
+                                  { id: 'groups_r3', label: '3ª Rodada' },
+                                  { id: 'round_of_32', label: '16-avos' },
+                                  { id: 'round_of_16', label: 'Oitavas' },
+                                  { id: 'quarter_finals', label: 'Quartas' },
+                                  { id: 'semi_finals', label: 'Semifinal' },
+                                  { id: 'third_place', label: '3º Lugar' },
+                                  { id: 'final', label: 'Final' }
+                                ].map(chip => (
+                                  <button
+                                    key={chip.id}
+                                    onClick={() => setSelectedPhaseFilter(chip.id)}
+                                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all border ${
+                                      selectedPhaseFilter === chip.id
+                                        ? 'bg-[#FF7A00] text-black border-[#FF7A00] shadow-[0_0_10px_rgba(255,122,0,0.3)]'
+                                        : 'bg-[#151515] border-[#262626] text-neutral-400 hover:text-white hover:border-neutral-700'
+                                    }`}
                                   >
-                                    {/* Header row: phase label + date + status */}
-                                    <div className="flex items-center justify-between mb-2.5">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="text-[9px] font-bold bg-[#1D1D1D] px-2 py-0.5 rounded-sm text-neutral-400 uppercase">
-                                          {PHASE_MAP[match.phase]?.label || match.phase}
-                                        </span>
-                                        <span className="text-[9px] text-neutral-500 font-semibold">
-                                          {dateFormatted} · {timeFormatted}
-                                        </span>
-                                      </div>
-                                      {tbd ? (
-                                        <span className="text-[8px] font-bold bg-[#FF7A00]/20 text-[#FF7A00] px-1.5 py-0.5 rounded-sm uppercase border border-[#FF7A00]/30 animate-pulse">A definir</span>
-                                      ) : locked ? (
-                                        <Lock className="w-3 h-3 text-[#FF4D4D] opacity-80" />
-                                      ) : (
-                                        <Check className="w-3 h-3 text-[#2ECC71] opacity-80" />
-                                      )}
-                                    </div>
+                                    {chip.label}
+                                  </button>
+                                ))}
+                              </div>
 
-                                    {/* 3-column grid: Home | Score | Away */}
-                                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-                                      {/* Home Team */}
-                                      <div className="flex flex-col items-center gap-1 text-center overflow-hidden">
-                                        <ImageWithFallback src={match.home_team_crest} alt={match.home_team} />
-                                        <span className="text-[11px] font-bold text-white leading-tight w-full" style={{overflow:'hidden',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical'}}>{translateTeam(match.home_team)}</span>
-                                      </div>
+                              {groupedMatches.map(group => (
+                                <div key={group.label} className="space-y-3">
+                                  <div className="flex items-center gap-2 px-1 py-1 border-b border-[#262626]">
+                                    <span className="w-1.5 h-3 bg-[#FF7A00] rounded-sm"></span>
+                                    <h4 className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">
+                                      {group.label}
+                                    </h4>
+                                  </div>
 
-                                      {/* Score controllers / Match Result */}
-                                      {locked ? (
-                                        <div className={`flex items-center gap-3 px-3 py-1.5 rounded border shrink-0 ${
-                                          match.is_finished 
-                                            ? 'bg-[#2ECC71]/10 border-[#2ECC71]/20' 
-                                            : 'bg-[#FF4D4D]/10 border-[#FF4D4D]/20'
-                                        }`}>
-                                          <span className={`text-xl font-black ${match.is_finished ? 'text-[#2ECC71]' : 'text-[#FF4D4D]'}`}>{match.home_score ?? 0}</span>
-                                          <span className="text-neutral-500 font-bold text-sm">×</span>
-                                          <span className={`text-xl font-black ${match.is_finished ? 'text-[#2ECC71]' : 'text-[#FF4D4D]'}`}>{match.away_score ?? 0}</span>
-                                        </div>
-                                      ) : (
-                                        <div className="flex items-center gap-1 bg-[#1D1D1D] px-2 py-1.5 rounded-sm border border-[#262626] shrink-0">
-                                          <div className="flex flex-col items-center gap-0.5">
-                                            <button onClick={() => handleUserPredictionChange(match.id, 'home', 'inc')} className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"><Plus className="w-3 h-3" /></button>
-                                            <span className="text-base font-black w-5 text-center text-white">{pred.home}</span>
-                                            <button onClick={() => handleUserPredictionChange(match.id, 'home', 'dec')} className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"><Minus className="w-3 h-3" /></button>
-                                          </div>
-                                          <span className="text-neutral-600 font-bold text-sm px-0.5">×</span>
-                                          <div className="flex flex-col items-center gap-0.5">
-                                            <button onClick={() => handleUserPredictionChange(match.id, 'away', 'inc')} className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"><Plus className="w-3 h-3" /></button>
-                                            <span className="text-base font-black w-5 text-center text-white">{pred.away}</span>
-                                            <button onClick={() => handleUserPredictionChange(match.id, 'away', 'dec')} className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"><Minus className="w-3 h-3" /></button>
-                                          </div>
-                                        </div>
-                                      )}
+                                  {group.matches.map(match => {
+                                    const locked = isMatchLocked(match.kickoff_time);
+                                    const tbd = isTbdMatch(match);
+                                    const pred = userPredictions[match.id] || { home: 0, away: 0 };
+                                    const kickoffDate = new Date(match.kickoff_time);
+                                    const dateFormatted = kickoffDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+                                    const timeFormatted = kickoffDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                                    const isKnockout = match.phase !== 'groups';
+                                    const isDrawPred = pred.home === pred.away;
+                                    const showTiebreaker = isKnockout && isDrawPred && !locked && !tbd;
+                                    const tiePick = tiebreakerPicks[match.id] || null;
 
-                                      {/* Away Team */}
-                                      <div className="flex flex-col items-center gap-1 text-center overflow-hidden">
-                                        <ImageWithFallback src={match.away_team_crest} alt={match.away_team} />
-                                        <span className="text-[11px] font-bold text-white leading-tight w-full" style={{overflow:'hidden',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical'}}>{translateTeam(match.away_team)}</span>
-                                      </div>
-                                    </div>
-
-                                    {!locked && !tbd && (
-                                      <p className="text-[9px] text-neutral-400 font-semibold text-center mt-2 leading-normal">
-                                        Palpites até: <span className="text-[#FF7A00] font-bold">{getFormattedDeadline(match.kickoff_time)}</span>
-                                      </p>
-                                    )}
-                                    {tbd && (
-                                      <p className="text-[9px] text-[#FF7A00] font-bold text-center mt-2 leading-normal">Confronto a definir</p>
-                                    )}
-                                    {/* Tiebreaker selector — knockout + draw prediction */}
-                                    {showTiebreaker && (
-                                      <div className="mt-2 pt-2 border-t border-[#262626] space-y-1.5">
-                                        <p className="text-[9px] font-bold text-[#FF7A00] uppercase tracking-wider text-center">
-                                          🏆 Quem classifica? <span className="text-neutral-500 font-normal">(+5 pts bônus)</span>
-                                        </p>
-                                        <div className="grid grid-cols-2 gap-1.5">
-                                          <button
-                                            onClick={() => handleTiebreakerPick(match.id, 'home')}
-                                            className={`flex items-center justify-center gap-1 py-1.5 px-2 rounded-sm border text-[10px] font-bold transition-all active:scale-95 ${
-                                              tiePick === 'home'
-                                                ? 'bg-[#FF7A00] border-[#FF7A00] text-black'
-                                                : 'bg-[#1D1D1D] border-[#262626] text-neutral-400 hover:border-[#FF7A00]/50'
-                                            }`}
-                                          >
-                                            <ImageWithFallback src={match.home_team_crest} alt={match.home_team} />
-                                            <span className="truncate max-w-[70px]">{translateTeam(match.home_team)}</span>
-                                          </button>
-                                          <button
-                                            onClick={() => handleTiebreakerPick(match.id, 'away')}
-                                            className={`flex items-center justify-center gap-1 py-1.5 px-2 rounded-sm border text-[10px] font-bold transition-all active:scale-95 ${
-                                              tiePick === 'away'
-                                                ? 'bg-[#FF7A00] border-[#FF7A00] text-black'
-                                                : 'bg-[#1D1D1D] border-[#262626] text-neutral-400 hover:border-[#FF7A00]/50'
-                                            }`}
-                                          >
-                                            <ImageWithFallback src={match.away_team_crest} alt={match.away_team} />
-                                            <span className="truncate max-w-[70px]">{translateTeam(match.away_team)}</span>
-                                          </button>
-                                        </div>
-                                      </div>
-                                    )}
-                                    
-                                    {/* User's own palpite & points details if locked */}
-                                    {locked && !tbd && (
-                                      <div className="space-y-1 bg-[#1D1D1D]/50 p-2 rounded border border-[#262626]/40 text-left text-xs mt-2">
-                                        <div className="flex items-center justify-between">
-                                          <span className="text-neutral-400 font-semibold">Seu Palpite:</span>
-                                          <span className="font-bold text-[#FF7A00]">{userPredictions[match.id] ? `${userPredictions[match.id].home} × ${userPredictions[match.id].away}` : 'Sem palpite'}</span>
-                                        </div>
-                                        {match.is_finished && userPredictions[match.id] && (
-                                          <div className="flex items-center justify-between border-t border-[#262626]/60 pt-1 mt-1">
-                                            <span className="text-neutral-400 font-semibold">Pontos Ganhos:</span>
-                                            <span className="font-black text-[#2ECC71]">
-                                              +{calculatePointsForPrediction(
-                                                userPredictions[match.id].home, userPredictions[match.id].away,
-                                                match.home_score ?? 0, match.away_score ?? 0,
-                                                match.phase,
-                                                tiebreakerPicks[match.id] ?? null,
-                                                match.advance_team ?? null
-                                              )} pts
+                                    return (
+                                      <div 
+                                        key={match.id} 
+                                        className={`bg-[#151515] border border-[#262626] rounded-md p-3.5 shadow-card transition-opacity duration-200 ${tbd ? 'opacity-50' : ''}`}
+                                      >
+                                        {/* Header row: phase label + date + status */}
+                                        <div className="flex items-center justify-between mb-2.5">
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="text-[9px] font-bold bg-[#1D1D1D] px-2 py-0.5 rounded-sm text-neutral-400 uppercase">
+                                              {match.subphaseLabel || PHASE_MAP[match.phase]?.label || match.phase}
+                                            </span>
+                                            <span className="text-[9px] text-neutral-500 font-semibold">
+                                              {dateFormatted} · {timeFormatted}
                                             </span>
                                           </div>
-                                        )}
-                                      </div>
-                                    )}
+                                          {tbd ? (
+                                            <span className="text-[8px] font-bold bg-[#FF7A00]/20 text-[#FF7A00] px-1.5 py-0.5 rounded-sm uppercase border border-[#FF7A00]/30 animate-pulse">A definir</span>
+                                          ) : locked ? (
+                                            <Lock className="w-3 h-3 text-[#FF4D4D] opacity-80" />
+                                          ) : (
+                                            <Check className="w-3 h-3 text-[#2ECC71] opacity-80" />
+                                          )}
+                                        </div>
 
-                                    <button
-                                      onClick={() => toggleGuessesExpansion(match.id)}
-                                      className="w-full mt-2.5 py-1.5 bg-[#1D1D1D] hover:bg-[#262626] border border-[#262626] rounded-sm text-[9px] font-bold text-neutral-400 hover:text-white transition-all flex items-center justify-center gap-1 focus:outline-none"
-                                    >
-                                      <span>👥 Palpites do grupo</span>
-                                      <span>{expandedGuesses[match.id] ? '▲' : '▼'}</span>
-                                    </button>
-                                    {expandedGuesses[match.id] && renderParticipantGuesses(match.id)}
-                                  </div>
-                                );
-                              })}
+                                        {/* 3-column grid: Home | Score | Away */}
+                                        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                                          {/* Home Team */}
+                                          <div className="flex flex-col items-center gap-1 text-center overflow-hidden">
+                                            <ImageWithFallback src={match.home_team_crest} alt={match.home_team} />
+                                            <span className="text-[11px] font-bold text-white leading-tight w-full" style={{overflow:'hidden',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical'}}>{translateTeam(match.home_team)}</span>
+                                          </div>
+
+                                          {/* Score controllers / Match Result */}
+                                          {locked ? (
+                                            <div className={`flex items-center gap-3 px-3 py-1.5 rounded border shrink-0 ${
+                                              match.is_finished 
+                                                ? 'bg-[#2ECC71]/10 border-[#2ECC71]/20' 
+                                                : 'bg-[#FF4D4D]/10 border-[#FF4D4D]/20'
+                                            }`}>
+                                              <span className={`text-xl font-black ${match.is_finished ? 'text-[#2ECC71]' : 'text-[#FF4D4D]'}`}>{match.home_score ?? 0}</span>
+                                              <span className="text-neutral-500 font-bold text-sm">×</span>
+                                              <span className={`text-xl font-black ${match.is_finished ? 'text-[#2ECC71]' : 'text-[#FF4D4D]'}`}>{match.away_score ?? 0}</span>
+                                            </div>
+                                          ) : (
+                                            <div className="flex items-center gap-1 bg-[#1D1D1D] px-2 py-1.5 rounded-sm border border-[#262626] shrink-0">
+                                              <div className="flex flex-col items-center gap-0.5">
+                                                <button onClick={() => handleUserPredictionChange(match.id, 'home', 'inc')} className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"><Plus className="w-3 h-3" /></button>
+                                                <span className="text-base font-black w-5 text-center text-white">{pred.home}</span>
+                                                <button onClick={() => handleUserPredictionChange(match.id, 'home', 'dec')} className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"><Minus className="w-3 h-3" /></button>
+                                              </div>
+                                              <span className="text-neutral-600 font-bold text-sm px-0.5">×</span>
+                                              <div className="flex flex-col items-center gap-0.5">
+                                                <button onClick={() => handleUserPredictionChange(match.id, 'away', 'inc')} className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"><Plus className="w-3 h-3" /></button>
+                                                <span className="text-base font-black w-5 text-center text-white">{pred.away}</span>
+                                                <button onClick={() => handleUserPredictionChange(match.id, 'away', 'dec')} className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"><Minus className="w-3 h-3" /></button>
+                                              </div>
+                                            </div>
+                                          )}
+
+                                          {/* Away Team */}
+                                          <div className="flex flex-col items-center gap-1 text-center overflow-hidden">
+                                            <ImageWithFallback src={match.away_team_crest} alt={match.away_team} />
+                                            <span className="text-[11px] font-bold text-white leading-tight w-full" style={{overflow:'hidden',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical'}}>{translateTeam(match.away_team)}</span>
+                                          </div>
+                                        </div>
+
+                                        {!locked && !tbd && (
+                                          <p className="text-[9px] text-neutral-400 font-semibold text-center mt-2 leading-normal">
+                                            Palpites até: <span className="text-[#FF7A00] font-bold">{getFormattedDeadline(match.kickoff_time)}</span>
+                                          </p>
+                                        )}
+                                        {tbd && (
+                                          <p className="text-[9px] text-[#FF7A00] font-bold text-center mt-2 leading-normal">Confronto a definir</p>
+                                        )}
+
+                                        {/* Tiebreaker selector — knockout + draw prediction */}
+                                        {showTiebreaker && (
+                                          <div className="mt-2 pt-2 border-t border-[#262626] space-y-1.5">
+                                            <p className="text-[9px] font-bold text-[#FF7A00] uppercase tracking-wider text-center">
+                                              🏆 Quem classifica? <span className="text-neutral-500 font-normal">(+5 pts bônus)</span>
+                                            </p>
+                                            <div className="grid grid-cols-2 gap-1.5">
+                                              <button
+                                                onClick={() => handleTiebreakerPick(match.id, 'home')}
+                                                className={`flex items-center justify-center gap-1 py-1.5 px-2 rounded-sm border text-[10px] font-bold transition-all active:scale-95 ${
+                                                  tiePick === 'home'
+                                                    ? 'bg-[#FF7A00] border-[#FF7A00] text-black'
+                                                    : 'bg-[#1D1D1D] border-[#262626] text-neutral-400 hover:border-[#FF7A00]/50'
+                                                }`}
+                                              >
+                                                <ImageWithFallback src={match.home_team_crest} alt={match.home_team} />
+                                                <span className="truncate max-w-[70px]">{translateTeam(match.home_team)}</span>
+                                              </button>
+                                              <button
+                                                onClick={() => handleTiebreakerPick(match.id, 'away')}
+                                                className={`flex items-center justify-center gap-1 py-1.5 px-2 rounded-sm border text-[10px] font-bold transition-all active:scale-95 ${
+                                                  tiePick === 'away'
+                                                    ? 'bg-[#FF7A00] border-[#FF7A00] text-black'
+                                                    : 'bg-[#1D1D1D] border-[#262626] text-neutral-400 hover:border-[#FF7A00]/50'
+                                                }`}
+                                              >
+                                                <ImageWithFallback src={match.away_team_crest} alt={match.away_team} />
+                                                <span className="truncate max-w-[70px]">{translateTeam(match.away_team)}</span>
+                                              </button>
+                                            </div>
+                                          </div>
+                                        )}
+
+                                        {/* User's own palpite & points details if locked */}
+                                        {locked && !tbd && (
+                                          <div className="space-y-1 bg-[#1D1D1D]/50 p-2 rounded border border-[#262626]/40 text-left text-xs mt-2">
+                                            <div className="flex items-center justify-between">
+                                              <span className="text-neutral-400 font-semibold">Seu Palpite:</span>
+                                              <span className="font-bold text-[#FF7A00]">{userPredictions[match.id] ? `${userPredictions[match.id].home} × ${userPredictions[match.id].away}` : 'Sem palpite'}</span>
+                                            </div>
+                                            {match.is_finished && userPredictions[match.id] && (
+                                              <div className="flex items-center justify-between border-t border-[#262626]/60 pt-1 mt-1">
+                                                <span className="text-neutral-400 font-semibold">Pontos Ganhos:</span>
+                                                <span className="font-black text-[#2ECC71]">
+                                                  +{calculatePointsForPrediction(
+                                                    userPredictions[match.id].home, userPredictions[match.id].away,
+                                                    match.home_score ?? 0, match.away_score ?? 0,
+                                                    match.phase,
+                                                    tiebreakerPicks[match.id] ?? null,
+                                                    match.advance_team ?? null
+                                                  )} pts
+                                                </span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+
+                                        <button
+                                          onClick={() => toggleGuessesExpansion(match.id)}
+                                          className="w-full mt-2.5 py-1.5 bg-[#1D1D1D] hover:bg-[#262626] border border-[#262626] rounded-sm text-[9px] font-bold text-neutral-400 hover:text-white transition-all flex items-center justify-center gap-1 focus:outline-none"
+                                        >
+                                          <span>👥 Palpites do grupo</span>
+                                          <span>{expandedGuesses[match.id] ? '▲' : '▼'}</span>
+                                        </button>
+                                        {expandedGuesses[match.id] && renderParticipantGuesses(match.id)}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              ))}
                             </motion.div>
                           )}
                         </AnimatePresence>
@@ -2140,25 +2573,40 @@ export default function App() {
             </div>
 
             {/* Join Pool Form (Always visible at the top of the tab for ease of access) */}
-            <div className="bg-[#151515] border border-[#262626] rounded-md p-4 space-y-2">
-              <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Entrar com Código de Convite</label>
-              <form onSubmit={handleJoinPoolByCode} className="flex gap-2">
-                <input 
-                  type="text" 
-                  maxLength="8"
-                  required
-                  placeholder="Ex: XF92A7B8"
-                  value={inviteCodeInput}
-                  onChange={(e) => setInviteCodeInput(e.target.value.toUpperCase())}
-                  className="flex-1 bg-[#1D1D1D] border border-[#262626] rounded-sm px-3.5 py-2.5 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-[#FF7A00] transition-colors uppercase"
-                />
+            <div className="bg-[#151515] border border-[#262626] rounded-md p-4 space-y-3">
+              <div>
+                <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Entrar com Código de Convite</label>
+                <form onSubmit={handleJoinPoolByCode} className="flex gap-2 mt-1.5">
+                  <input 
+                    type="text" 
+                    maxLength="8"
+                    required
+                    placeholder="Ex: XF92A7B8"
+                    value={inviteCodeInput}
+                    onChange={(e) => setInviteCodeInput(e.target.value.toUpperCase())}
+                    className="flex-1 bg-[#1D1D1D] border border-[#262626] rounded-sm px-3.5 py-2.5 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-[#FF7A00] transition-colors uppercase"
+                  />
+                  <button
+                    type="submit"
+                    className="bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-xs px-4 py-2.5 rounded-sm active:scale-95 transition-all"
+                  >
+                    Entrar
+                  </button>
+                </form>
+              </div>
+
+              <div className="border-t border-[#262626] pt-3 flex justify-between items-center">
+                <span className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider">Quer jogar em ligas públicas?</span>
                 <button
-                  type="submit"
-                  className="bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-xs px-4 py-2.5 rounded-sm active:scale-95 transition-all"
+                  onClick={() => {
+                    loadPublicPools();
+                    setIsBrowseModalOpen(true);
+                  }}
+                  className="text-xs text-[#FF7A00] hover:text-[#FF8C1A] font-bold flex items-center gap-1 active:scale-95 transition-all"
                 >
-                  Entrar
+                  Procurar bolões livres 🔍
                 </button>
-              </form>
+              </div>
             </div>
 
             {pools.length > 0 ? (
@@ -2173,7 +2621,13 @@ export default function App() {
                       <div>
                         <h3 className="text-lg font-bold text-white">{pool.name}</h3>
                         <p className="text-xs text-neutral-400 mt-1 flex items-center gap-2">
-                          <span className="bg-[#1D1D1D] text-neutral-300 px-2 py-0.5 rounded-sm font-bold uppercase">Rodada 1/6</span>
+                          <span className={`px-2 py-0.5 rounded-sm font-bold uppercase ${
+                            pool.mode === 'round' 
+                              ? 'bg-[#FF7A00]/10 text-[#FF7A00] border border-[#FF7A00]/20' 
+                              : 'bg-[#64D2FF]/10 text-[#64D2FF] border border-[#64D2FF]/20'
+                          }`}>
+                            {pool.mode === 'round' ? 'Por Rodada' : 'Total Acumulado'}
+                          </span>
                           <span className="flex items-center gap-1 font-semibold text-neutral-500">
                             <Coins className="w-3.5 h-3.5 text-[#F1C40F]" /> {pool.entry_fee > 0 ? `R$ ${pool.entry_fee}` : 'Grátis'}
                           </span>
@@ -2258,7 +2712,18 @@ export default function App() {
         {activeTab === 'ranking' && (
           <div className="space-y-6">
             <div>
-              <p className="text-xs text-neutral-400 font-semibold tracking-wider uppercase">Classificação Geral</p>
+              <p className="text-xs text-neutral-400 font-semibold tracking-wider uppercase flex items-center gap-1.5 flex-wrap">
+                <span>Classificação Geral</span>
+                {selectedPool && (
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wide border ${
+                    selectedPool.mode === 'round' 
+                      ? 'bg-[#FF7A00]/10 text-[#FF7A00] border-[#FF7A00]/20' 
+                      : 'bg-[#64D2FF]/10 text-[#64D2FF] border-[#64D2FF]/20'
+                  }`}>
+                    {selectedPool.mode === 'round' ? 'Por Rodada' : 'Total Acumulado'}
+                  </span>
+                )}
+              </p>
               <h1 className="text-3xl font-bold tracking-tight mt-1">{selectedPool ? selectedPool.name : 'Leaderboard'}</h1>
             </div>
 
@@ -2283,6 +2748,15 @@ export default function App() {
 
             {selectedPool ? (
               <>
+                {selectedPool.mode === 'round' && (
+                  <div className="bg-[#1A130C] border border-[#FF7A00]/20 rounded-md p-3 text-xs text-neutral-300 flex items-start gap-2 shadow-sm my-2">
+                    <span className="text-[#FF7A00] font-bold shrink-0">ℹ️ Por Rodada:</span>
+                    <span>
+                      Esta liga reseta a cada rodada. O ranking abaixo exibe apenas os pontos obtidos na rodada selecionada no topo da tela.
+                    </span>
+                  </div>
+                )}
+
                 {/* Classificação Atual */}
                 <div className="space-y-3">
                   <div className="flex justify-between items-center text-[10px] text-neutral-500 font-bold px-2 uppercase tracking-wider">
@@ -2292,7 +2766,7 @@ export default function App() {
 
                   <div className="space-y-2">
                     {standings.map((p, idx) => {
-                      const isFirst = idx === 0;
+                      const isFirst = p.rank === 1;
                       const tierColors = {
                         'Diamante': 'bg-[#64D2FF]/10 text-[#64D2FF] border-[#64D2FF]/20',
                         'Ouro': 'bg-[#FFD700]/10 text-[#FFD700] border-[#FFD700]/20',
@@ -2311,7 +2785,7 @@ export default function App() {
                         >
                           <div className="flex items-center gap-3">
                             <span className={`w-5 text-center font-bold text-sm ${isFirst ? 'text-[#FF7A00]' : 'text-neutral-500'}`}>
-                              {idx + 1}º
+                              {p.rank}º
                             </span>
                             
                             <div className="flex flex-col">
@@ -2702,115 +3176,6 @@ export default function App() {
             )}
           </div>
         )}
-
-        {/* --- VIEW 6: HISTÓRICO DE PALPITES --- */}
-        {activeTab === 'historico' && (
-          <div className="space-y-6">
-            <div>
-              <p className="text-xs text-neutral-400 font-semibold tracking-wider uppercase">Seu Desempenho</p>
-              <h1 className="text-3xl font-bold tracking-tight mt-1">Histórico de Palpites</h1>
-            </div>
-
-            {/* Pool Selector Dropdown */}
-            {pools.length > 0 && (
-              <div className="bg-[#151515] border border-[#262626] rounded-md p-3">
-                <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block mb-1.5">Selecionar Bolão</label>
-                <select
-                  value={selectedPool?.id || ''}
-                  onChange={(e) => {
-                    const found = pools.find(p => p.id === e.target.value);
-                    if (found) setSelectedPool(found);
-                  }}
-                  className="w-full bg-[#1D1D1D] border border-[#262626] rounded-sm py-2 px-3 text-xs text-white focus:outline-none focus:border-[#FF7A00]"
-                >
-                  {pools.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {selectedPool ? (
-              historyLoading ? (
-                <div className="text-center py-8 text-neutral-400 text-sm">Carregando histórico...</div>
-              ) : historyGuesses.length > 0 ? (
-                <div className="space-y-3">
-                  {historyGuesses.map((guess) => {
-                    const match = guess.matches;
-                    if (!match) return null;
-                    
-                    const pts = guess.points_earned ?? 0;
-                    let badgeBg = 'bg-neutral-800 text-neutral-400 border-neutral-700';
-                    let badgeText = '0 pts';
-                    if (pts >= 25) {
-                      badgeBg = 'bg-[#2ECC71]/10 text-[#2ECC71] border-[#2ECC71]/20';
-                      badgeText = `+${pts} pts`;
-                    } else if (pts === 10) {
-                      badgeBg = 'bg-[#3B82F6]/10 text-[#3B82F6] border-[#3B82F6]/20';
-                      badgeText = `+${pts} pts`;
-                    } else if (pts > 0) {
-                      badgeBg = 'bg-[#3B82F6]/10 text-[#3B82F6] border-[#3B82F6]/20';
-                      badgeText = `+${pts} pts`;
-                    }
-
-                    return (
-                      <div 
-                        key={guess.id} 
-                        className="bg-[#151515] border border-[#262626] rounded-md p-4 shadow-card flex items-center justify-between gap-4"
-                      >
-                        <div className="flex-1 space-y-2.5">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[9px] font-bold bg-[#1D1D1D] px-2 py-0.5 rounded-sm text-neutral-400 uppercase">
-                              {PHASE_MAP[match.phase]?.label || match.phase}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-3">
-                            <div className="flex items-center gap-2 w-[110px] justify-end text-right">
-                              <span className="text-xs font-bold text-white truncate">{translateTeam(match.home_team)}</span>
-                              <ImageWithFallback src={match.home_team_crest} alt={match.home_team} />
-                            </div>
-
-                            <div className="flex flex-col items-center justify-center min-w-[60px]">
-                              <div className="text-sm font-black text-[#FF7A00] flex items-center gap-1" title="Seu Palpite">
-                                <span>{guess.home_guess}</span>
-                                <span className="text-neutral-600 text-xs font-normal">x</span>
-                                <span>{guess.away_guess}</span>
-                              </div>
-                              
-                              <div className="text-[10px] text-neutral-500 font-semibold mt-0.5 flex items-center gap-1" title="Placar Oficial">
-                                <span>({match.home_score}</span>
-                                <span>x</span>
-                                <span>{match.away_score})</span>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-2 w-[110px] justify-start text-left">
-                              <ImageWithFallback src={match.away_team_crest} alt={match.away_team} />
-                              <span className="text-xs font-bold text-white truncate">{translateTeam(match.away_team)}</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className={`shrink-0 border px-2.5 py-1.5 rounded-sm font-bold text-xs ${badgeBg}`}>
-                          {badgeText}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="bg-[#151515] border border-[#262626] rounded-md p-8 text-center text-neutral-400 text-xs shadow-card">
-                  Nenhum palpite finalizado para este bolão.
-                </div>
-              )
-            ) : (
-              <div className="bg-[#151515] border border-[#262626] rounded-md p-8 text-center shadow-card">
-                <p className="text-sm text-neutral-400">Por favor, crie ou entre em um bolão para ver o histórico.</p>
-              </div>
-            )}
-          </div>
-        )}
       </>
     )}
   </main>
@@ -2845,7 +3210,7 @@ export default function App() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">Taxa de Entrada (R$)</label>
+                <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Taxa de Entrada (R$)</label>
                 <input 
                   type="number" 
                   step="0.01"
@@ -2855,6 +3220,72 @@ export default function App() {
                   onChange={(e) => setNewPoolFee(e.target.value)}
                   className="w-full bg-[#1D1D1D] border border-[#262626] rounded-sm px-3.5 py-3.5 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-[#FF7A00] transition-colors"
                 />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Modalidade do Bolão</label>
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  <button
+                    type="button"
+                    onClick={() => setNewPoolMode('total')}
+                    className={`flex flex-col items-center justify-center p-3 rounded-sm border transition-all text-center ${
+                      newPoolMode === 'total' 
+                        ? 'border-[#FF7A00] bg-[#FF7A00]/10 text-white' 
+                        : 'border-[#262626] bg-[#1D1D1D] text-neutral-400 hover:border-neutral-700'
+                    }`}
+                  >
+                    <span className="text-xs font-bold">Bolão Total</span>
+                    <span className="text-[9px] text-neutral-500 mt-1">Acumulado do início ao fim</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewPoolMode('round')}
+                    className={`flex flex-col items-center justify-center p-3 rounded-sm border transition-all text-center ${
+                      newPoolMode === 'round' 
+                        ? 'border-[#FF7A00] bg-[#FF7A00]/10 text-white' 
+                        : 'border-[#262626] bg-[#1D1D1D] text-neutral-400 hover:border-neutral-700'
+                    }`}
+                  >
+                    <span className="text-xs font-bold">Por Rodada</span>
+                    <span className="text-[9px] text-neutral-500 mt-1">Zera a cada rodada/fase</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Privacidade do Bolão</label>
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  <button
+                    type="button"
+                    disabled={!newPoolFee || parseFloat(newPoolFee) === 0}
+                    onClick={() => setNewPoolIsPrivate(true)}
+                    className={`flex flex-col items-center justify-center p-3 rounded-sm border transition-all text-center ${
+                      (!newPoolFee || parseFloat(newPoolFee) === 0)
+                        ? 'border-[#262626] bg-[#151515] text-neutral-600 cursor-not-allowed opacity-50'
+                        : newPoolIsPrivate 
+                          ? 'border-[#FF7A00] bg-[#FF7A00]/10 text-white' 
+                          : 'border-[#262626] bg-[#1D1D1D] text-neutral-400 hover:border-neutral-700'
+                    }`}
+                  >
+                    <span className="text-xs font-bold">Apenas Convidados</span>
+                    <span className="text-[9px] text-neutral-500 mt-1">Código de convite e aprovação</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewPoolIsPrivate(false)}
+                    className={`flex flex-col items-center justify-center p-3 rounded-sm border transition-all text-center ${
+                      (!newPoolFee || parseFloat(newPoolFee) === 0) || !newPoolIsPrivate
+                        ? 'border-[#FF7A00] bg-[#FF7A00]/10 text-white' 
+                        : 'border-[#262626] bg-[#1D1D1D] text-neutral-400 hover:border-neutral-700'
+                    }`}
+                  >
+                    <span className="text-xs font-bold">Livre (Público)</span>
+                    <span className="text-[9px] text-neutral-500 mt-1">Entrada livre, sem aprovação</span>
+                  </button>
+                </div>
+                {(!newPoolFee || parseFloat(newPoolFee) === 0) && (
+                  <span className="text-[9px] text-neutral-500 mt-1 block">Bolões grátis devem obrigatoriamente ser de entrada livre.</span>
+                )}
               </div>
 
               <div className="pt-2">
@@ -2867,6 +3298,70 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- PUBLIC POOLS BROWSER MODAL --- */}
+      {isBrowseModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-[#151515] border border-[#262626] rounded-md w-full max-w-sm p-6 space-y-5 animate-fade-in shadow-2xl relative max-h-[85vh] flex flex-col">
+            <button 
+              onClick={() => setIsBrowseModalOpen(false)}
+              className="absolute top-4 right-4 text-neutral-400 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="shrink-0">
+              <h2 className="text-xl font-bold text-white flex items-center gap-1.5">
+                <span>Buscar Bolões Livres</span>
+                <span className="text-xs font-normal text-neutral-400">🔍</span>
+              </h2>
+              <p className="text-xs text-neutral-400 mt-1">Ligas públicas de entrada livre, sem precisar de convite ou aprovação.</p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto min-h-0 py-2 space-y-3 scrollbar-thin">
+              {browseLoading ? (
+                <div className="text-center py-8 text-neutral-400 text-sm">Carregando ligas públicas...</div>
+              ) : publicPools.length > 0 ? (
+                publicPools.map(pool => (
+                  <div 
+                    key={pool.id}
+                    className="bg-[#1D1D1D] border border-[#262626] rounded-sm p-3.5 flex justify-between items-center hover:border-neutral-700 transition-all"
+                  >
+                    <div className="space-y-1 pr-3 overflow-hidden">
+                      <h4 className="text-sm font-bold text-white truncate">{pool.name}</h4>
+                      <p className="text-[10px] text-neutral-400 flex items-center gap-2 flex-wrap">
+                        <span className={`px-1.5 py-0.5 rounded-sm font-bold uppercase ${
+                          pool.mode === 'round' 
+                            ? 'bg-[#FF7A00]/10 text-[#FF7A00] border border-[#FF7A00]/20' 
+                            : 'bg-[#64D2FF]/10 text-[#64D2FF] border border-[#64D2FF]/20'
+                        }`}>
+                          {pool.mode === 'round' ? 'Por Rodada' : 'Total'}
+                        </span>
+                        <span className="flex items-center gap-0.5 font-semibold text-neutral-400">
+                          <Coins className="w-3 h-3 text-[#F1C40F]" /> {pool.entry_fee > 0 ? `R$ ${pool.entry_fee}` : 'Grátis'}
+                        </span>
+                        <span className="flex items-center gap-0.5 font-semibold text-neutral-400">
+                          <Users className="w-3 h-3 text-neutral-500" /> {pool.participant_count}
+                        </span>
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleJoinPublicPool(pool)}
+                      className="bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-xs px-3 py-2 rounded-sm active:scale-95 transition-all shrink-0"
+                    >
+                      Entrar
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-8 text-neutral-500 text-xs">
+                  Nenhuma liga pública livre disponível para participar no momento.
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -2893,16 +3388,16 @@ export default function App() {
                 if (!mProfile) return null;
                 
                 const isOwner = selectedPool.owner_id === mProfile.id;
-                const targetRole = mProfile.role || 'user';
-                const currentUserRole = profile?.role || 'user';
+                const targetRole = member.role || 'member';
                 const isCurrentUserOwner = selectedPool.owner_id === session.user.id;
+                const myMembership = poolMembers.find(m => m.profiles?.id === session.user.id);
+                const isMyMembershipAdmin = myMembership?.role === 'admin';
+                const isCurrentUserGlobalAdmin = profile?.role === 'admin';
                 
-                // Can manage logic
-                const canManage = isCurrentUserOwner || currentUserRole === 'admin' || currentUserRole === 'premium';
-                const isTargetAdmin = targetRole === 'admin';
-                const isPremiumLogged = currentUserRole === 'premium';
+                const canManage = isCurrentUserOwner || isMyMembershipAdmin || isCurrentUserGlobalAdmin;
                 const isSelf = mProfile.id === session.user.id;
-                const isButtonDisabled = (isPremiumLogged && isTargetAdmin) || isSelf;
+                const isTargetOwner = selectedPool.owner_id === mProfile.id;
+                const isButtonDisabled = isSelf || isTargetOwner;
 
                 return (
                   <div key={mProfile.id} className="flex items-center justify-between bg-[#1D1D1D] p-2.5 rounded-sm border border-[#262626] text-xs">
@@ -2920,7 +3415,13 @@ export default function App() {
                           {isOwner && <span className="text-[8px] bg-[#FF7A00]/20 text-[#FF7A00] px-1.5 py-0.5 rounded-sm uppercase font-bold">Criador</span>}
                         </div>
                         <div className="flex items-center gap-1 mt-0.5">
-                          <UserRoleBadge role={targetRole} />
+                          {isOwner ? (
+                            <span className="text-[9px] font-bold text-[#FF7A00] uppercase tracking-wider">Criador</span>
+                          ) : member.role === 'admin' ? (
+                            <span className="text-[9px] font-bold text-[#64D2FF] uppercase tracking-wider">Moderador</span>
+                          ) : (
+                            <span className="text-[9px] font-bold text-neutral-500 uppercase tracking-wider">Participante</span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -2964,62 +3465,57 @@ export default function App() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="bg-[#151515] border border-[#262626] rounded-md w-full max-w-sm p-6 space-y-5 animate-fade-in shadow-2xl relative">
             <button 
-              onClick={() => { setIsManageModalOpen(false); setTargetUserToManage(null); }}
+              onClick={() => {
+                setIsManageModalOpen(false);
+                setTargetUserToManage(null);
+              }}
               className="absolute top-4 right-4 text-neutral-400 hover:text-white"
             >
               <X className="w-5 h-5" />
             </button>
 
             <div>
-              <h2 className="text-xl font-bold text-white">Gerenciar Usuário</h2>
-              <p className="text-xs text-neutral-400 mt-1">Altere a função de <strong className="text-white">{targetUserToManage.full_name}</strong> no sistema.</p>
+              <h2 className="text-xl font-bold text-white">Gerenciar Participante</h2>
+              <p className="text-xs text-neutral-400 mt-1">Altere a função de <strong className="text-white">{targetUserToManage.full_name}</strong> no bolão.</p>
             </div>
 
             <div className="space-y-4">
               <div className="space-y-1.5">
-                <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">Nova Função</label>
+                <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">Nova Função no Bolão</label>
                 <select
                   value={newRoleSelected}
                   onChange={(e) => setNewRoleSelected(e.target.value)}
-                  className="w-full bg-[#1D1D1D] border border-[#262626] rounded-sm py-2 px-3 text-xs text-white focus:outline-none focus:border-[#FF7A00]"
+                  className="w-full bg-[#1D1D1D] border border-[#262626] rounded-sm py-2.5 px-3 text-xs text-white focus:outline-none focus:border-[#FF7A00]"
                 >
-                  <option value="user">User (Participante Padrão)</option>
-                  <option value="premium">Premium (Moderador)</option>
-                  {/* Admin option is only available if current logged user is admin */}
-                  {profile?.role === 'admin' && (
-                    <option value="admin">Admin (Administrador Geral)</option>
-                  )}
+                  <option value="member">Participante Padrão</option>
+                  <option value="admin">Moderador (Gerencia convites/membros)</option>
                 </select>
               </div>
 
-              <div className="pt-2">
+              <div className="space-y-3 pt-2">
                 <button
                   onClick={async () => {
                     try {
                       const { error } = await supabase
-                        .from('profiles')
+                        .from('pool_members')
                         .update({ role: newRoleSelected })
-                        .eq('id', targetUserToManage.id);
+                        .eq('pool_id', selectedPool.id)
+                        .eq('user_id', targetUserToManage.id);
                         
                       if (error) throw error;
                       
-                      triggerToast(`Função de ${targetUserToManage.full_name} alterada para ${newRoleSelected}!`);
+                      triggerToast(`Função de ${targetUserToManage.full_name} alterada para ${newRoleSelected === 'admin' ? 'Moderador' : 'Participante'}!`);
                       
                       // Update local pool members list
                       setPoolMembers(prev => prev.map(m => {
                         if (m.profiles?.id === targetUserToManage.id) {
                           return {
                             ...m,
-                            profiles: { ...m.profiles, role: newRoleSelected }
+                            role: newRoleSelected
                           };
                         }
                         return m;
                       }));
-
-                      // If target user is the logged user, update global profile state
-                      if (targetUserToManage.id === session.user.id) {
-                        setProfile(prev => ({ ...prev, role: newRoleSelected }));
-                      }
                       
                       setIsManageModalOpen(false);
                       setTargetUserToManage(null);
@@ -3028,10 +3524,19 @@ export default function App() {
                       triggerToast('Erro ao atualizar função');
                     }
                   }}
-                  className="w-full bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-sm h-12 rounded-sm active:scale-95 transition-all flex items-center justify-center gap-1.5"
+                  className="w-full bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-sm h-11 rounded-sm active:scale-95 transition-all flex items-center justify-center gap-1.5"
                 >
                   <UserCheck className="w-4 h-4" />
                   <span>SALVAR ALTERAÇÕES</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleRemoveMember(selectedPool.id, targetUserToManage.id)}
+                  className="w-full bg-[#FF4D4D]/10 hover:bg-[#FF4D4D]/20 border border-[#FF4D4D]/30 text-[#FF4D4D] font-bold text-xs h-11 rounded-sm active:scale-95 transition-all flex items-center justify-center gap-1.5"
+                >
+                  <X className="w-4 h-4" />
+                  <span>REMOVER DO BOLÃO</span>
                 </button>
               </div>
             </div>
@@ -3169,14 +3674,6 @@ export default function App() {
         >
           <BarChart3 className="w-5 h-5" />
           <span className="text-[10px] font-bold">Ranking</span>
-        </button>
-
-        <button 
-          onClick={() => setActiveTab('historico')}
-          className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'historico' ? 'text-[#FF7A00]' : 'text-neutral-500 hover:text-white'}`}
-        >
-          <History className="w-5 h-5" />
-          <span className="text-[10px] font-bold">Histórico</span>
         </button>
 
         <button 
