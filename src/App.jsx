@@ -202,7 +202,7 @@ export default function App() {
   const [newPoolName, setNewPoolName] = useState('');
   const [newPoolFee, setNewPoolFee] = useState('');
   const [pushReminder, setPushReminder] = useState(true);
-  const [replicateGuesses, setReplicateGuesses] = useState(false);
+  const carouselItemRefs = React.useRef({});
   const [isListExpanded, setIsListExpanded] = useState(false);
   const platform = usePlatform();
   const matchSectionRef = React.useRef(null);
@@ -386,6 +386,32 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('bolao_active_tab', activeTab);
   }, [activeTab]);
+
+  // Auto-scroll Carousel to the next guessable match
+  useEffect(() => {
+    if (!selectedPool || activeTab !== 'inicio') return;
+
+    const activeMatches = matches.filter(match => {
+      const isTbd = isTbdMatch(match);
+      const kickoff = dayjs(match.kickoff_time);
+      const isWorldCup2026 = kickoff.year() === 2026 && (kickoff.month() >= 4 && kickoff.month() <= 6);
+      return !isTbd && isWorldCup2026;
+    });
+
+    if (activeMatches.length > 0 && !isListExpanded) {
+      const nextMatch = activeMatches.find(m => !isMatchLocked(m.kickoff_time));
+      if (nextMatch && carouselItemRefs.current[nextMatch.id]) {
+        const timer = setTimeout(() => {
+          carouselItemRefs.current[nextMatch.id].scrollIntoView({
+            behavior: 'smooth',
+            block: 'nearest',
+            inline: 'center'
+          });
+        }, 300);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [matches, isListExpanded, selectedPool, activeTab]);
 
   // Auth Listener
   useEffect(() => {
@@ -954,44 +980,19 @@ export default function App() {
     }));
 
     try {
-      if (replicateGuesses) {
-        // Bulk upsert across all user pools
-        const upsertPromises = pools.map(pool => {
-          return supabase
-            .from('guesses')
-            .upsert({
-              user_id: session.user.id,
-              match_id: matchId,
-              pool_id: pool.id,
-              home_guess: updatedPred.home,
-              away_guess: updatedPred.away
-            }, { onConflict: 'user_id,match_id,pool_id' });
-        });
-        await Promise.all(upsertPromises);
-      } else {
-        const existing = poolGuesses.find(g => g.match_id === matchId && g.user_id === session.user.id && g.pool_id === selectedPool.id);
-        if (existing) {
-          const { error } = await supabase
-            .from('guesses')
-            .update({
-              home_guess: updatedPred.home,
-              away_guess: updatedPred.away
-            })
-            .eq('id', existing.id);
-          if (error) throw error;
-        } else {
-          const { error } = await supabase
-            .from('guesses')
-            .insert({
-              user_id: session.user.id,
-              match_id: matchId,
-              pool_id: selectedPool.id,
-              home_guess: updatedPred.home,
-              away_guess: updatedPred.away
-            });
-          if (error) throw error;
-        }
-      }
+      // Bulk upsert across all user pools to keep predictions universal
+      const upsertPromises = pools.map(pool => {
+        return supabase
+          .from('guesses')
+          .upsert({
+            user_id: session.user.id,
+            match_id: matchId,
+            pool_id: pool.id,
+            home_guess: updatedPred.home,
+            away_guess: updatedPred.away
+          }, { onConflict: 'user_id,match_id,pool_id' });
+      });
+      await Promise.all(upsertPromises);
 
       // Reload pool guesses to keep state in sync
       const { data: updatedGuesses } = await supabase
@@ -1018,8 +1019,7 @@ export default function App() {
     setTiebreakerPicks(prev => ({ ...prev, [matchId]: newPick }));
 
     try {
-      const poolsToUpdate = replicateGuesses ? pools : [selectedPool];
-      const promises = poolsToUpdate.map(pool =>
+      const promises = pools.map(pool =>
         supabase
           .from('guesses')
           .upsert({
@@ -1484,8 +1484,10 @@ export default function App() {
                             <span className="text-xs font-bold text-white leading-tight truncate w-full">{translateTeam(match.home_team)}</span>
                           </div>
 
-                          <div className="flex items-center justify-center bg-[#151515]/80 px-3.5 py-1.5 rounded border border-[#262626]">
-                            <span className="text-xs font-black text-neutral-500 uppercase tracking-wider">VS</span>
+                          <div className="flex items-center gap-3 px-3 py-1.5 bg-[#151515]/80 rounded border border-[#262626]">
+                            <span className="text-2xl font-black text-white">{match.home_score ?? 0}</span>
+                            <span className="text-neutral-600 font-bold text-sm">×</span>
+                            <span className="text-2xl font-black text-white">{match.away_score ?? 0}</span>
                           </div>
 
                           <div className="flex flex-col items-center gap-1 text-center overflow-hidden">
@@ -1678,55 +1680,7 @@ export default function App() {
 
                   {activeMatches.length > 0 ? (
                     <>
-                      {/* Replicate Toggle Action — only shown when user is in 2+ pools */}
-                      {pools.length > 1 && (
-                        <>
-                          <div className="bg-[#151515] border border-[#262626] rounded-md p-3.5 flex items-center justify-between shadow-sm">
-                            <span className="text-xs text-neutral-300 font-semibold">Aplicar palpites em todos os meus bolões</span>
-                            <button 
-                              onClick={() => {
-                                setReplicateGuesses(!replicateGuesses);
-                                triggerToast(!replicateGuesses ? 'Palpites serão salvos em todos os seus bolões!' : 'Replicação desativada');
-                              }}
-                              className={`w-11 h-6 rounded-full transition-colors relative focus:outline-none flex items-center px-0.5 ${
-                                replicateGuesses ? 'bg-[#FF7A00]' : 'bg-[#262626]'
-                              }`}
-                            >
-                              <span className={`w-5 h-5 rounded-full bg-white shadow-md transform transition-transform duration-200 ${
-                                replicateGuesses ? 'translate-x-[22px]' : 'translate-x-0'
-                              }`} />
-                            </button>
-                          </div>
-
-                          {/* Granular Pool Selector when Replicate is OFF */}
-                          {!replicateGuesses && (
-                            <div className="bg-[#151515] border border-[#262626] rounded-md p-3.5 space-y-2.5 shadow-sm">
-                              <span className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Palpitar no Bolão:</span>
-                              <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-                                {pools.map(pool => {
-                                  const isSelected = selectedPool?.id === pool.id;
-                                  return (
-                                    <button
-                                      key={pool.id}
-                                      onClick={() => {
-                                        setSelectedPool(pool);
-                                        triggerToast(`Visualizando palpites do bolão: ${pool.name}`);
-                                      }}
-                                      className={`px-3.5 py-2 rounded-full text-xs font-bold border transition-all whitespace-nowrap active:scale-95 shrink-0 ${
-                                        isSelected 
-                                          ? 'bg-[#FF7A00] text-black border-[#FF7A00] shadow-[0_0_10px_rgba(255,122,0,0.3)]' 
-                                          : 'bg-[#1D1D1D] text-neutral-400 border-[#262626] hover:text-white'
-                                      }`}
-                                    >
-                                      {pool.name}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      )}
+                      {/* Palpites são universais para todos os bolões do usuário */}
 
                       {/* View Toggle (Carousel vs List) */}
                       <div ref={matchSectionRef} className="flex justify-between items-center bg-[#151515] border border-[#262626] rounded-md p-2 shadow-sm text-xs font-bold my-2">
@@ -1773,6 +1727,7 @@ export default function App() {
                                 return (
                                   <div 
                                     key={match.id} 
+                                    ref={el => carouselItemRefs.current[match.id] = el}
                                     className={`min-w-[280px] w-[280px] snap-center bg-[#151515] border border-[#262626] rounded-md p-4 shadow-card flex flex-col gap-3 transition-opacity duration-200 ${tbd ? 'opacity-50' : ''}`}
                                   >
                                     {/* Match Phase and Lock Badge */}
@@ -1817,15 +1772,15 @@ export default function App() {
                                       </div>
 
                                       {/* Score Controls / Match Result */}
-                                      {match.is_finished ? (
-                                        <div className="flex items-center gap-3 px-3 py-1.5 bg-[#2ECC71]/10 rounded border border-[#2ECC71]/20 shrink-0">
-                                          <span className="text-xl font-black text-[#2ECC71]">{match.home_score ?? 0}</span>
+                                      {locked ? (
+                                        <div className={`flex items-center gap-3 px-3 py-1.5 rounded border shrink-0 ${
+                                          match.is_finished 
+                                            ? 'bg-[#2ECC71]/10 border-[#2ECC71]/20' 
+                                            : 'bg-[#FF4D4D]/10 border-[#FF4D4D]/20'
+                                        }`}>
+                                          <span className={`text-xl font-black ${match.is_finished ? 'text-[#2ECC71]' : 'text-[#FF4D4D]'}`}>{match.home_score ?? 0}</span>
                                           <span className="text-neutral-500 font-bold text-sm">×</span>
-                                          <span className="text-xl font-black text-[#2ECC71]">{match.away_score ?? 0}</span>
-                                        </div>
-                                      ) : locked ? (
-                                        <div className="flex items-center justify-center bg-[#151515]/80 px-3.5 py-1.5 rounded border border-[#262626] shrink-0">
-                                          <span className="text-xs font-black text-neutral-500 uppercase tracking-wider">VS</span>
+                                          <span className={`text-xl font-black ${match.is_finished ? 'text-[#2ECC71]' : 'text-[#FF4D4D]'}`}>{match.away_score ?? 0}</span>
                                         </div>
                                       ) : (
                                         <div className="flex items-center gap-1 bg-[#1D1D1D] px-2 py-1.5 rounded-sm border border-[#262626] shrink-0">
@@ -2001,15 +1956,15 @@ export default function App() {
                                       </div>
 
                                       {/* Score controllers / Match Result */}
-                                      {match.is_finished ? (
-                                        <div className="flex items-center gap-3 px-3 py-1.5 bg-[#2ECC71]/10 rounded border border-[#2ECC71]/20 shrink-0">
-                                          <span className="text-xl font-black text-[#2ECC71]">{match.home_score ?? 0}</span>
+                                      {locked ? (
+                                        <div className={`flex items-center gap-3 px-3 py-1.5 rounded border shrink-0 ${
+                                          match.is_finished 
+                                            ? 'bg-[#2ECC71]/10 border-[#2ECC71]/20' 
+                                            : 'bg-[#FF4D4D]/10 border-[#FF4D4D]/20'
+                                        }`}>
+                                          <span className={`text-xl font-black ${match.is_finished ? 'text-[#2ECC71]' : 'text-[#FF4D4D]'}`}>{match.home_score ?? 0}</span>
                                           <span className="text-neutral-500 font-bold text-sm">×</span>
-                                          <span className="text-xl font-black text-[#2ECC71]">{match.away_score ?? 0}</span>
-                                        </div>
-                                      ) : locked ? (
-                                        <div className="flex items-center justify-center bg-[#151515]/80 px-3.5 py-1.5 rounded border border-[#262626] shrink-0">
-                                          <span className="text-xs font-black text-neutral-500 uppercase tracking-wider">VS</span>
+                                          <span className={`text-xl font-black ${match.is_finished ? 'text-[#2ECC71]' : 'text-[#FF4D4D]'}`}>{match.away_score ?? 0}</span>
                                         </div>
                                       ) : (
                                         <div className="flex items-center gap-1 bg-[#1D1D1D] px-2 py-1.5 rounded-sm border border-[#262626] shrink-0">
@@ -2328,171 +2283,61 @@ export default function App() {
 
             {selectedPool ? (
               <>
-                {/* Custom Tab Switcher */}
-                <div className="flex bg-[#151515] p-1 rounded-sm border border-[#262626]">
-                  <button 
-                    onClick={() => setRankingTab('classificacao')}
-                    className={`flex-1 py-2 text-xs font-bold rounded-sm transition-all ${rankingTab === 'classificacao' ? 'bg-[#262626] text-[#FF7A00]' : 'text-neutral-400 hover:text-white'}`}
-                  >
-                    Classificação Atual
-                  </button>
-                  <button 
-                    onClick={() => setRankingTab('simulador')}
-                    className={`flex-1 py-2 text-xs font-bold rounded-sm transition-all flex items-center justify-center gap-1 ${rankingTab === 'simulador' ? 'bg-[#262626] text-[#FF7A00]' : 'text-neutral-400 hover:text-white'}`}
-                  >
-                    <TrendingUp className="w-3.5 h-3.5" />
-                    <span>Simulador de Ranking</span>
-                  </button>
-                </div>
-
-                {/* TAB 1: Classificação Atual */}
-                {rankingTab === 'classificacao' && (
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center text-[10px] text-neutral-500 font-bold px-2 uppercase tracking-wider">
-                      <span>Posição & Participante</span>
-                      <span>Pontos</span>
-                    </div>
-
-                    <div className="space-y-2">
-                      {standings.map((p, idx) => {
-                        const isFirst = idx === 0;
-                        const tierColors = {
-                          'Diamante': 'bg-[#64D2FF]/10 text-[#64D2FF] border-[#64D2FF]/20',
-                          'Ouro': 'bg-[#FFD700]/10 text-[#FFD700] border-[#FFD700]/20',
-                          'Prata': 'bg-[#C0C0C0]/10 text-[#C0C0C0] border-[#C0C0C0]/20',
-                          'Bronze': 'bg-[#CD7F32]/10 text-[#CD7F32] border-[#CD7F32]/20',
-                        };
-
-                        return (
-                          <div 
-                            key={p.id} 
-                            className={`bg-[#151515] border rounded-md p-3.5 flex items-center justify-between transition-all ${
-                              isFirst 
-                                ? 'border-[#FF7A00] shadow-[0_0_15px_rgba(255,122,0,0.2)] bg-[#1A130C] border-l-4 border-l-[#FF7A00]' 
-                                : 'border-[#262626] hover:border-neutral-800'
-                            } ${p.isUser && !isFirst ? 'ring-1 ring-[#FF7A00]/30' : ''}`}
-                          >
-                            <div className="flex items-center gap-3">
-                              <span className={`w-5 text-center font-bold text-sm ${isFirst ? 'text-[#FF7A00]' : 'text-neutral-500'}`}>
-                                {idx + 1}º
-                              </span>
-                              
-                              <div className="flex flex-col">
-                                <div className="flex items-center gap-2">
-                                  <span className={`text-sm font-bold ${p.isUser ? 'text-[#FF7A00]' : 'text-white'}`}>
-                                    {p.name} {p.isUser && '👤'}
-                                  </span>
-                                  <UserRoleBadge role={p.role} />
-                                </div>
-                                <div className="flex items-center gap-1.5 mt-0.5">
-                                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-sm border ${tierColors[p.tier] || tierColors['Bronze']}`}>
-                                    {p.tier}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="text-right">
-                              <span className="text-base font-black text-white">{p.points}</span>
-                              <span className="text-[10px] text-neutral-500 block font-semibold">pts</span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                {/* Classificação Atual */}
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center text-[10px] text-neutral-500 font-bold px-2 uppercase tracking-wider">
+                    <span>Posição & Participante</span>
+                    <span>Pontos</span>
                   </div>
-                )}
 
-                {/* TAB 2: Simulador de Ranking */}
-                {rankingTab === 'simulador' && (
-                  <div className="space-y-4">
-                    <div className="bg-[#FF7A00]/10 border border-[#FF7A00]/20 rounded-md p-3.5 flex gap-2.5 items-start">
-                      <AlertCircle className="w-5 h-5 text-[#FF7A00] shrink-0 mt-0.5" />
-                      <div className="text-xs">
-                        <p className="font-bold text-[#FF7A00]">Simulador de Resultados Ativo</p>
-                        <p className="text-neutral-400 mt-1 leading-relaxed">
-                          Altere o placar final projetado dos jogos abaixo para recalcular instantaneamente as pontuações e ver quem assumiria o topo da tabela!
-                        </p>
-                      </div>
-                    </div>
+                  <div className="space-y-2">
+                    {standings.map((p, idx) => {
+                      const isFirst = idx === 0;
+                      const tierColors = {
+                        'Diamante': 'bg-[#64D2FF]/10 text-[#64D2FF] border-[#64D2FF]/20',
+                        'Ouro': 'bg-[#FFD700]/10 text-[#FFD700] border-[#FFD700]/20',
+                        'Prata': 'bg-[#C0C0C0]/10 text-[#C0C0C0] border-[#C0C0C0]/20',
+                        'Bronze': 'bg-[#CD7F32]/10 text-[#CD7F32] border-[#CD7F32]/20',
+                      };
 
-                    {/* Simulated Matches List */}
-                    <div className="space-y-3">
-                      {matches.filter(m => !m.is_finished && dayjs(m.kickoff_time).year() === 2026 && (dayjs(m.kickoff_time).month() >= 4 && dayjs(m.kickoff_time).month() <= 6)).map(match => {
-                        const sim = simulatedScores[match.id] || { home: 0, away: 0 };
-                        
-                        return (
-                          <div key={match.id} className="bg-[#151515] border border-[#262626] rounded-md p-4 shadow-card hover:border-neutral-800 transition-all">
-                            <div className="flex justify-between items-center mb-3">
-                              <span className="text-[9px] font-bold bg-[#1D1D1D] px-2 py-0.5 rounded-pill text-neutral-400 uppercase">
-                                {PHASE_MAP[match.phase]?.label || match.phase}
-                              </span>
-                              <span className="text-[9px] font-bold text-[#FF7A00] bg-[#FF7A00]/10 px-2 py-0.5 rounded-sm border border-[#FF7A00]/20">
-                                Multiplicador: {PHASE_MAP[match.phase]?.mult || 1}x
-                              </span>
-                            </div>
-
-                            <div className="flex items-center justify-between">
-                              {/* Home Team */}
-                              <div className="flex flex-col items-center gap-1.5 w-24 text-center">
-                                <ImageWithFallback src={match.home_team_crest} alt={match.home_team} />
-                                <span className="text-xs font-bold text-white truncate max-w-full mt-1">{translateTeam(match.home_team)}</span>
+                      return (
+                        <div 
+                          key={p.id} 
+                          className={`bg-[#151515] border rounded-md p-3.5 flex items-center justify-between transition-all ${
+                            isFirst 
+                              ? 'border-[#FF7A00] shadow-[0_0_15px_rgba(255,122,0,0.2)] bg-[#1A130C] border-l-4 border-l-[#FF7A00]' 
+                              : 'border-[#262626] hover:border-neutral-800'
+                          } ${p.isUser && !isFirst ? 'ring-1 ring-[#FF7A00]/30' : ''}`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className={`w-5 text-center font-bold text-sm ${isFirst ? 'text-[#FF7A00]' : 'text-neutral-500'}`}>
+                              {idx + 1}º
+                            </span>
+                            
+                            <div className="flex flex-col">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-sm font-bold ${p.isUser ? 'text-[#FF7A00]' : 'text-white'}`}>
+                                  {p.name} {p.isUser && '👤'}
+                                </span>
+                                <UserRoleBadge role={p.role} />
                               </div>
-
-                              {/* Simulation Controls */}
-                              <div className="flex items-center gap-2 bg-[#1D1D1D] px-3 py-1.5 rounded-md border border-[#262626]">
-                                <div className="flex items-center gap-1">
-                                  <button 
-                                    onClick={() => handleSimulatedScoreChange(match.id, 'home', 'dec')}
-                                    className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"
-                                  >
-                                    <Minus className="w-3 h-3" />
-                                  </button>
-                                  <span className="text-lg font-bold w-4 text-center text-white">{sim.home}</span>
-                                  <button 
-                                    onClick={() => handleSimulatedScoreChange(match.id, 'home', 'inc')}
-                                    className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"
-                                  >
-                                    <Plus className="w-3 h-3" />
-                                  </button>
-                                </div>
-
-                                <span className="text-neutral-600 font-bold px-1">x</span>
-
-                                <div className="flex items-center gap-1">
-                                  <button 
-                                    onClick={() => handleSimulatedScoreChange(match.id, 'away', 'dec')}
-                                    className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"
-                                  >
-                                    <Minus className="w-3 h-3" />
-                                  </button>
-                                  <span className="text-lg font-bold w-4 text-center text-white">{sim.away}</span>
-                                  <button 
-                                    onClick={() => handleSimulatedScoreChange(match.id, 'away', 'inc')}
-                                    className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"
-                                  >
-                                    <Plus className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              </div>
-
-                              {/* Away Team */}
-                              <div className="flex flex-col items-center gap-1.5 w-24 text-center">
-                                <ImageWithFallback src={match.away_team_crest} alt={match.away_team} />
-                                <span className="text-xs font-bold text-white truncate max-w-full mt-1">{translateTeam(match.away_team)}</span>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-sm border ${tierColors[p.tier] || tierColors['Bronze']}`}>
+                                  {p.tier}
+                                </span>
                               </div>
                             </div>
                           </div>
-                        );
-                      })}
-                      {matches.filter(m => !m.is_finished && dayjs(m.kickoff_time).year() === 2026 && (dayjs(m.kickoff_time).month() >= 4 && dayjs(m.kickoff_time).month() <= 6)).length === 0 && (
-                        <div className="bg-[#151515] border border-[#262626] rounded-md p-8 text-center text-neutral-400 text-xs">
-                          Não há jogos futuros disponíveis para simulação.
+
+                          <div className="text-right">
+                            <span className="text-base font-black text-white">{p.points}</span>
+                            <span className="text-[10px] text-neutral-500 block font-semibold">pts</span>
+                          </div>
                         </div>
-                      )}
-                    </div>
+                      );
+                    })}
                   </div>
-                )}
+                </div>
               </>
             ) : (
               <div className="bg-[#151515] border border-[#262626] rounded-md p-8 text-center shadow-card">
