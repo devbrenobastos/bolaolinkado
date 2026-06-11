@@ -284,28 +284,43 @@ export default function App() {
       );
     }
 
-    const otherMembersGuesses = poolMembers
-      .filter(m => m.profiles && m.profiles.id !== session.user.id)
+    const membersGuesses = poolMembers
+      .filter(m => m.profiles)
       .map(m => {
         const guess = poolGuesses.find(g => g.user_id === m.profiles.id && g.match_id === matchId);
+        let pts = 0;
+        if (match.is_finished && guess) {
+          pts = calculatePointsForPrediction(
+            guess.home_guess, guess.away_guess,
+            match.home_score ?? 0, match.away_score ?? 0,
+            match.phase,
+            guess.tiebreaker_pick ?? null,
+            match.advance_team ?? null
+          );
+        }
         return {
           profile: m.profiles,
-          guess: guess ? `${guess.home_guess} × ${guess.away_guess}` : 'Sem palpite'
+          guess: guess ? `${guess.home_guess} × ${guess.away_guess}` : 'Sem palpite',
+          points: pts,
+          hasGuess: !!guess
         };
-      });
+      })
+      .sort((a, b) => b.points - a.points);
 
-    if (otherMembersGuesses.length === 0) {
+    if (membersGuesses.length === 0) {
       return (
         <div className="text-center p-2 text-[10px] text-neutral-500 mt-2">
-          Não há outros participantes neste bolão.
+          Não há participantes neste bolão.
         </div>
       );
     }
 
     return (
-      <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto pr-1">
-        {otherMembersGuesses.map(({ profile: p, guess }) => (
-          <div key={p.id} className="flex items-center justify-between bg-[#1D1D1D] p-2 rounded-sm border border-[#262626] text-[11px]">
+      <div className="mt-2 space-y-1.5 max-h-48 overflow-y-auto pr-1">
+        {membersGuesses.map(({ profile: p, guess, points, hasGuess }) => (
+          <div key={p.id} className={`flex items-center justify-between p-2 rounded-sm border text-[11px] ${
+            p.id === session.user.id ? 'bg-[#FF7A00]/10 border-[#FF7A00]/30' : 'bg-[#1D1D1D] border-[#262626]'
+          }`}>
             <div className="flex items-center gap-1.5 truncate">
               <div className="w-5 h-5 rounded bg-[#FF7A00]/20 text-[#FF7A00] flex items-center justify-center font-bold text-[9px] overflow-hidden shrink-0 border border-[#FF7A00]/10">
                 {p.avatar_url ? (
@@ -314,9 +329,18 @@ export default function App() {
                   p.full_name.charAt(0).toUpperCase()
                 )}
               </div>
-              <span className="font-semibold text-white truncate max-w-[120px]">{p.full_name}</span>
+              <span className={`font-semibold truncate max-w-[120px] ${p.id === session.user.id ? 'text-[#FF7A00]' : 'text-white'}`}>
+                {p.full_name} {p.id === session.user.id && '(Você)'}
+              </span>
             </div>
-            <span className="font-bold text-[#FF7A00] px-1.5 py-0.5 bg-[#262626] rounded-sm">{guess}</span>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-[#FF7A00] px-1.5 py-0.5 bg-[#262626] rounded-sm">{guess}</span>
+              {match.is_finished && hasGuess && (
+                <span className="font-bold text-[10px] bg-[#2ECC71]/20 text-[#2ECC71] border border-[#2ECC71]/30 px-1.5 py-0.5 rounded-sm">
+                  +{points} pts
+                </span>
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -1633,12 +1657,11 @@ export default function App() {
             {/* Upcoming Matches Section */}
             {selectedPool && (() => {
               const activeMatches = matches.filter(match => {
-                const isLocked = isMatchLocked(match.kickoff_time);
                 const isTbd = isTbdMatch(match);
                 const kickoff = dayjs(match.kickoff_time);
                 // World Cup 2026: June 11 – July 19, 2026 (months 4=May, 5=June, 6=July in 0-index)
                 const isWorldCup2026 = kickoff.year() === 2026 && (kickoff.month() >= 4 && kickoff.month() <= 6);
-                return !isLocked && !isTbd && isWorldCup2026;
+                return !isTbd && isWorldCup2026;
               });
 
               return (
@@ -1793,50 +1816,54 @@ export default function App() {
                                         <span className="text-[11px] font-bold text-white leading-tight w-full" style={{overflow:'hidden',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical'}}>{translateTeam(match.home_team)}</span>
                                       </div>
 
-                                      {/* Score Controls */}
-                                      <div className="flex items-center gap-1 bg-[#1D1D1D] px-2 py-1.5 rounded-sm border border-[#262626] shrink-0">
-                                        <div className="flex flex-col items-center gap-0.5">
-                                          {!locked && !tbd && (
+                                      {/* Score Controls / Match Result */}
+                                      {match.is_finished ? (
+                                        <div className="flex items-center gap-3 px-3 py-1.5 bg-[#2ECC71]/10 rounded border border-[#2ECC71]/20 shrink-0">
+                                          <span className="text-xl font-black text-[#2ECC71]">{match.home_score ?? 0}</span>
+                                          <span className="text-neutral-500 font-bold text-sm">×</span>
+                                          <span className="text-xl font-black text-[#2ECC71]">{match.away_score ?? 0}</span>
+                                        </div>
+                                      ) : locked ? (
+                                        <div className="flex items-center justify-center bg-[#151515]/80 px-3.5 py-1.5 rounded border border-[#262626] shrink-0">
+                                          <span className="text-xs font-black text-neutral-500 uppercase tracking-wider">VS</span>
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center gap-1 bg-[#1D1D1D] px-2 py-1.5 rounded-sm border border-[#262626] shrink-0">
+                                          <div className="flex flex-col items-center gap-0.5">
                                             <button 
                                               onClick={() => handleUserPredictionChange(match.id, 'home', 'inc')}
                                               className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"
                                             >
                                               <Plus className="w-3 h-3" />
                                             </button>
-                                          )}
-                                          <span className="text-base font-black w-5 text-center text-white">{pred.home}</span>
-                                          {!locked && !tbd && (
+                                            <span className="text-base font-black w-5 text-center text-white">{pred.home}</span>
                                             <button 
                                               onClick={() => handleUserPredictionChange(match.id, 'home', 'dec')}
                                               className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"
                                             >
                                               <Minus className="w-3 h-3" />
                                             </button>
-                                          )}
-                                        </div>
+                                          </div>
 
-                                        <span className="text-neutral-600 font-bold text-sm px-0.5">×</span>
+                                          <span className="text-neutral-600 font-bold text-sm px-0.5">×</span>
 
-                                        <div className="flex flex-col items-center gap-0.5">
-                                          {!locked && !tbd && (
+                                          <div className="flex flex-col items-center gap-0.5">
                                             <button 
                                               onClick={() => handleUserPredictionChange(match.id, 'away', 'inc')}
                                               className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"
                                             >
                                               <Plus className="w-3 h-3" />
                                             </button>
-                                          )}
-                                          <span className="text-base font-black w-5 text-center text-white">{pred.away}</span>
-                                          {!locked && !tbd && (
+                                            <span className="text-base font-black w-5 text-center text-white">{pred.away}</span>
                                             <button 
                                               onClick={() => handleUserPredictionChange(match.id, 'away', 'dec')}
                                               className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"
                                             >
                                               <Minus className="w-3 h-3" />
                                             </button>
-                                          )}
+                                          </div>
                                         </div>
-                                      </div>
+                                      )}
 
                                       {/* Away Team */}
                                       <div className="flex flex-col items-center gap-1 text-center overflow-hidden">
@@ -1878,8 +1905,32 @@ export default function App() {
                                           </div>
                                         </div>
                                       )}
+
+                                      {/* User's own palpite & points details if locked */}
+                                      {locked && !tbd && (
+                                        <div className="space-y-1 bg-[#1D1D1D]/50 p-2 rounded border border-[#262626]/40 text-left text-xs mb-1">
+                                          <div className="flex items-center justify-between">
+                                            <span className="text-neutral-400 font-semibold">Seu Palpite:</span>
+                                            <span className="font-bold text-[#FF7A00]">{userPredictions[match.id] ? `${userPredictions[match.id].home} × ${userPredictions[match.id].away}` : 'Sem palpite'}</span>
+                                          </div>
+                                          {match.is_finished && userPredictions[match.id] && (
+                                            <div className="flex items-center justify-between border-t border-[#262626]/60 pt-1 mt-1">
+                                              <span className="text-neutral-400 font-semibold">Pontos Ganhos:</span>
+                                              <span className="font-black text-[#2ECC71]">
+                                                +{calculatePointsForPrediction(
+                                                  userPredictions[match.id].home, userPredictions[match.id].away,
+                                                  match.home_score ?? 0, match.away_score ?? 0,
+                                                  match.phase,
+                                                  tiebreakerPicks[match.id] ?? null,
+                                                  match.advance_team ?? null
+                                                )} pts
+                                              </span>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
                                       <p className="text-[10px] text-neutral-500">
-                                        {locked ? 'Palpites encerrados.' : 'Palpite editável.'}
+                                        {match.is_finished ? 'Partida encerrada.' : locked ? 'Palpites encerrados.' : 'Palpite editável.'}
                                       </p>
 
                                       <button
@@ -1949,28 +2000,32 @@ export default function App() {
                                         <span className="text-[11px] font-bold text-white leading-tight w-full" style={{overflow:'hidden',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical'}}>{translateTeam(match.home_team)}</span>
                                       </div>
 
-                                      {/* Score controllers */}
-                                      <div className="flex items-center gap-1 bg-[#1D1D1D] px-2 py-1.5 rounded-sm border border-[#262626] shrink-0">
-                                        <div className="flex flex-col items-center gap-0.5">
-                                          {!locked && !tbd && (
+                                      {/* Score controllers / Match Result */}
+                                      {match.is_finished ? (
+                                        <div className="flex items-center gap-3 px-3 py-1.5 bg-[#2ECC71]/10 rounded border border-[#2ECC71]/20 shrink-0">
+                                          <span className="text-xl font-black text-[#2ECC71]">{match.home_score ?? 0}</span>
+                                          <span className="text-neutral-500 font-bold text-sm">×</span>
+                                          <span className="text-xl font-black text-[#2ECC71]">{match.away_score ?? 0}</span>
+                                        </div>
+                                      ) : locked ? (
+                                        <div className="flex items-center justify-center bg-[#151515]/80 px-3.5 py-1.5 rounded border border-[#262626] shrink-0">
+                                          <span className="text-xs font-black text-neutral-500 uppercase tracking-wider">VS</span>
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center gap-1 bg-[#1D1D1D] px-2 py-1.5 rounded-sm border border-[#262626] shrink-0">
+                                          <div className="flex flex-col items-center gap-0.5">
                                             <button onClick={() => handleUserPredictionChange(match.id, 'home', 'inc')} className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"><Plus className="w-3 h-3" /></button>
-                                          )}
-                                          <span className="text-base font-black w-5 text-center text-white">{pred.home}</span>
-                                          {!locked && !tbd && (
+                                            <span className="text-base font-black w-5 text-center text-white">{pred.home}</span>
                                             <button onClick={() => handleUserPredictionChange(match.id, 'home', 'dec')} className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"><Minus className="w-3 h-3" /></button>
-                                          )}
-                                        </div>
-                                        <span className="text-neutral-600 font-bold text-sm px-0.5">×</span>
-                                        <div className="flex flex-col items-center gap-0.5">
-                                          {!locked && !tbd && (
+                                          </div>
+                                          <span className="text-neutral-600 font-bold text-sm px-0.5">×</span>
+                                          <div className="flex flex-col items-center gap-0.5">
                                             <button onClick={() => handleUserPredictionChange(match.id, 'away', 'inc')} className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"><Plus className="w-3 h-3" /></button>
-                                          )}
-                                          <span className="text-base font-black w-5 text-center text-white">{pred.away}</span>
-                                          {!locked && !tbd && (
+                                            <span className="text-base font-black w-5 text-center text-white">{pred.away}</span>
                                             <button onClick={() => handleUserPredictionChange(match.id, 'away', 'dec')} className="w-5 h-5 rounded-sm bg-[#262626] hover:bg-[#333] flex items-center justify-center text-neutral-400 active:bg-[#FF7A00] active:text-black transition-colors"><Minus className="w-3 h-3" /></button>
-                                          )}
+                                          </div>
                                         </div>
-                                      </div>
+                                      )}
 
                                       {/* Away Team */}
                                       <div className="flex flex-col items-center gap-1 text-center overflow-hidden">
@@ -2020,6 +2075,30 @@ export default function App() {
                                       </div>
                                     )}
                                     
+                                    {/* User's own palpite & points details if locked */}
+                                    {locked && !tbd && (
+                                      <div className="space-y-1 bg-[#1D1D1D]/50 p-2 rounded border border-[#262626]/40 text-left text-xs mt-2">
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-neutral-400 font-semibold">Seu Palpite:</span>
+                                          <span className="font-bold text-[#FF7A00]">{userPredictions[match.id] ? `${userPredictions[match.id].home} × ${userPredictions[match.id].away}` : 'Sem palpite'}</span>
+                                        </div>
+                                        {match.is_finished && userPredictions[match.id] && (
+                                          <div className="flex items-center justify-between border-t border-[#262626]/60 pt-1 mt-1">
+                                            <span className="text-neutral-400 font-semibold">Pontos Ganhos:</span>
+                                            <span className="font-black text-[#2ECC71]">
+                                              +{calculatePointsForPrediction(
+                                                userPredictions[match.id].home, userPredictions[match.id].away,
+                                                match.home_score ?? 0, match.away_score ?? 0,
+                                                match.phase,
+                                                tiebreakerPicks[match.id] ?? null,
+                                                match.advance_team ?? null
+                                              )} pts
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+
                                     <button
                                       onClick={() => toggleGuessesExpansion(match.id)}
                                       className="w-full mt-2.5 py-1.5 bg-[#1D1D1D] hover:bg-[#262626] border border-[#262626] rounded-sm text-[9px] font-bold text-neutral-400 hover:text-white transition-all flex items-center justify-center gap-1 focus:outline-none"
