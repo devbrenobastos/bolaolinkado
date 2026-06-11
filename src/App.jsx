@@ -1033,54 +1033,7 @@ export default function App() {
       triggerToast('Erro ao registrar classificado.');
     }
   };
-  // Sincronização automática dos placares usando a API gratuita de worldcup26.ir
-  useEffect(() => {
-    if (matches.length === 0) return;
-
-    const syncScores = async () => {
-      try {
-        const res = await fetch('https://worldcup26.ir/get/games');
-        if (!res.ok) throw new Error('Falha ao buscar placares da API');
-        const data = await res.json();
-        
-        if (data && Array.isArray(data.games)) {
-          setMatches(prevMatches => {
-            return prevMatches.map(m => {
-              // Encontra o jogo correspondente na API por nome das equipes
-              const apiGame = data.games.find(g => 
-                (g.home_team_name_en?.toLowerCase() === m.home_team?.toLowerCase() &&
-                 g.away_team_name_en?.toLowerCase() === m.away_team?.toLowerCase()) ||
-                (g.home_team_name_en?.toLowerCase() === m.away_team?.toLowerCase() &&
-                 g.away_team_name_en?.toLowerCase() === m.home_team?.toLowerCase())
-              );
-
-              if (apiGame) {
-                const homeScore = apiGame.home_score !== null && apiGame.home_score !== 'null' ? parseInt(apiGame.home_score, 10) : null;
-                const awayScore = apiGame.away_score !== null && apiGame.away_score !== 'null' ? parseInt(apiGame.away_score, 10) : null;
-                const isFinished = apiGame.finished?.toUpperCase() === 'TRUE';
-                
-                // Retorna o match atualizado localmente
-                return {
-                  ...m,
-                  home_score: homeScore,
-                  away_score: awayScore,
-                  is_finished: isFinished
-                };
-              }
-              return m;
-            });
-          });
-        }
-      } catch (err) {
-        console.error('Erro na sincronização de placares:', err);
-      }
-    };
-
-    // Roda uma vez imediatamente e depois a cada 30 segundos
-    syncScores();
-    const interval = setInterval(syncScores, 30000);
-    return () => clearInterval(interval);
-  }, [matches.length]);
+  // Sincronização de placares ao vivo desativada no cliente (gerenciada via API e widget externo)
 
   // Helper to handle incrementing/decrementing simulated scores
   const handleSimulatedScoreChange = (matchId, side, action) => {
@@ -1145,9 +1098,7 @@ export default function App() {
         if (!guess) return;
         const pred = [guess.home_guess, guess.away_guess];
         
-        const isLive = !match.is_finished && new Date(match.kickoff_time) <= new Date();
-
-        if (match.is_finished || isLive) {
+        if (match.is_finished) {
           totalPoints += calculatePointsForPrediction(
             pred[0], pred[1],
             match.home_score ?? 0, match.away_score ?? 0,
