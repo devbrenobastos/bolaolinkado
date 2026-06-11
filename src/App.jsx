@@ -1460,10 +1460,8 @@ export default function App() {
                             <span className="text-xs font-bold text-white leading-tight truncate w-full">{translateTeam(match.home_team)}</span>
                           </div>
 
-                          <div className="flex items-center gap-3 px-3 py-1.5 bg-[#151515]/80 rounded border border-[#262626]">
-                            <span className="text-2xl font-black text-white">{match.home_score ?? 0}</span>
-                            <span className="text-neutral-600 font-bold text-sm">×</span>
-                            <span className="text-2xl font-black text-white">{match.away_score ?? 0}</span>
+                          <div className="flex items-center justify-center bg-[#151515]/80 px-3.5 py-1.5 rounded border border-[#262626]">
+                            <span className="text-xs font-black text-neutral-500 uppercase tracking-wider">VS</span>
                           </div>
 
                           <div className="flex flex-col items-center gap-1 text-center overflow-hidden">
