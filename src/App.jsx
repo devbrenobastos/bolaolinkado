@@ -1569,10 +1569,11 @@ export default function App() {
       const pProfile = m.profiles;
       if (!pProfile) return null;
 
-      let totalPoints = 0;
-      
+      let confirmedPoints = 0;
+      let livePoints = 0;
+
       matches.forEach(match => {
-        // O participante que entrar em um bolão em andamento entra zerado de pontos 
+        // O participante que entrar em um bolão em andamento entra zerado de pontos
         // e só começa pontuar nas partidas posteriores de seu palpite
         if (m.joined_at && new Date(match.kickoff_time) < new Date(m.joined_at)) {
           return;
@@ -1590,24 +1591,35 @@ export default function App() {
         const guess = poolGuesses.find(g => g.user_id === pProfile.id && g.match_id === match.id);
         if (!guess) return;
         const pred = [guess.home_guess, guess.away_guess];
-        
+
+        const isLiveNow = !match.is_finished && isMatchLocked(match.kickoff_time) && match.home_score !== null;
+
         if (match.is_finished) {
-          totalPoints += calculatePointsForPrediction(
+          confirmedPoints += calculatePointsForPrediction(
             pred[0], pred[1],
             match.home_score ?? 0, match.away_score ?? 0,
             match.phase,
             guess.tiebreaker_pick ?? null,
             match.advance_team ?? null
           );
+        } else if (isLiveNow) {
+          // Pontos provisórios baseados no placar atual do jogo em andamento
+          livePoints += calculatePointsForPrediction(
+            pred[0], pred[1],
+            match.home_score ?? 0, match.away_score ?? 0,
+            match.phase
+          );
         } else if (rankingTab === 'simulador') {
           const sim = simulatedScores[match.id] || { home: 0, away: 0 };
-          totalPoints += calculatePointsForPrediction(
+          confirmedPoints += calculatePointsForPrediction(
             pred[0], pred[1],
             sim.home, sim.away,
             match.phase
           );
         }
       });
+
+      const totalPoints = confirmedPoints + livePoints;
 
       // Determine tier dynamically
       let tier = 'Bronze';
@@ -1620,6 +1632,8 @@ export default function App() {
         name: pProfile.full_name,
         isUser: pProfile.id === session.user.id,
         points: totalPoints,
+        confirmedPoints,
+        livePoints,
         tier,
         role: pProfile.role || 'user'
       };
@@ -2900,6 +2914,18 @@ export default function App() {
                   </div>
                 )}
 
+                {/* Banner ao vivo */}
+                {(() => {
+                  const hasLive = matches.some(m => !m.is_finished && isMatchLocked(m.kickoff_time) && m.home_score !== null);
+                  if (!hasLive) return null;
+                  return (
+                    <div className="flex items-center gap-2 bg-green-950/40 border border-green-800/40 rounded-md px-3 py-2">
+                      <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse shrink-0" />
+                      <span className="text-[11px] text-green-400 font-semibold">Ranking ao vivo — pontuação atualiza conforme o placar muda</span>
+                    </div>
+                  );
+                })()}
+
                 {/* Classificação Atual */}
                 <div className="space-y-3">
                   <div className="flex justify-between items-center text-[10px] text-neutral-500 font-bold px-2 uppercase tracking-wider">
@@ -2918,11 +2944,11 @@ export default function App() {
                       };
 
                       return (
-                        <div 
-                          key={p.id} 
+                        <div
+                          key={p.id}
                           className={`bg-[#151515] border rounded-md p-3.5 flex items-center justify-between transition-all ${
-                            isFirst 
-                              ? 'border-[#FF7A00] shadow-[0_0_15px_rgba(255,122,0,0.2)] bg-[#1A130C] border-l-4 border-l-[#FF7A00]' 
+                            isFirst
+                              ? 'border-[#FF7A00] shadow-[0_0_15px_rgba(255,122,0,0.2)] bg-[#1A130C] border-l-4 border-l-[#FF7A00]'
                               : 'border-[#262626] hover:border-neutral-800'
                           } ${p.isUser && !isFirst ? 'ring-1 ring-[#FF7A00]/30' : ''}`}
                         >
@@ -2930,7 +2956,7 @@ export default function App() {
                             <span className={`w-5 text-center font-bold text-sm ${isFirst ? 'text-[#FF7A00]' : 'text-neutral-500'}`}>
                               {p.rank}º
                             </span>
-                            
+
                             <div className="flex flex-col">
                               <div className="flex items-center gap-2">
                                 <span className={`text-sm font-bold ${p.isUser ? 'text-[#FF7A00]' : 'text-white'}`}>
@@ -2942,6 +2968,12 @@ export default function App() {
                                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-sm border ${tierColors[p.tier] || tierColors['Bronze']}`}>
                                   {p.tier}
                                 </span>
+                                {p.livePoints > 0 && (
+                                  <span className="flex items-center gap-0.5 text-[9px] font-bold text-green-400 bg-green-950/50 border border-green-800/40 px-1.5 py-0.5 rounded-sm">
+                                    <span className="w-1 h-1 rounded-full bg-green-400 animate-pulse" />
+                                    +{p.livePoints} ao vivo
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
