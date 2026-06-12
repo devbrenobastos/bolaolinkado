@@ -949,36 +949,52 @@ export default function App() {
   };
 
   const copyUserGuessesToPool = async (targetPoolId, targetUserId) => {
-    const uid = targetUserId || session?.user?.id;
-    if (!uid) return;
-    const { data: existingGuesses } = await supabase
-      .from('guesses')
-      .select('match_id, home_guess, away_guess, tiebreaker_pick')
-      .eq('user_id', uid)
-      .neq('pool_id', targetPoolId);
+    try {
+      const uid = targetUserId || session?.user?.id;
+      if (!uid) return;
 
-    if (!existingGuesses?.length) return;
+      // Only copy guesses for matches still open (kickoff > now + 15 min)
+      // RLS blocks inserts for already-started matches, so we filter them here
+      const cutoff = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+      const openMatchIds = matches
+        .filter(m => !m.is_finished && m.kickoff_time > cutoff)
+        .map(m => m.id);
 
-    const seen = new Set();
-    const toInsert = [];
-    for (const g of existingGuesses) {
-      if (!seen.has(g.match_id)) {
-        seen.add(g.match_id);
-        toInsert.push({
-          user_id: uid,
-          match_id: g.match_id,
-          pool_id: targetPoolId,
-          home_guess: g.home_guess,
-          away_guess: g.away_guess,
-          tiebreaker_pick: g.tiebreaker_pick || null,
-        });
-      }
-    }
+      if (openMatchIds.length === 0) return;
 
-    if (toInsert.length > 0) {
-      await supabase
+      const { data: existingGuesses } = await supabase
         .from('guesses')
-        .upsert(toInsert, { onConflict: 'user_id,match_id,pool_id' });
+        .select('match_id, home_guess, away_guess, tiebreaker_pick')
+        .eq('user_id', uid)
+        .neq('pool_id', targetPoolId)
+        .in('match_id', openMatchIds);
+
+      if (!existingGuesses?.length) return;
+
+      const seen = new Set();
+      const toInsert = [];
+      for (const g of existingGuesses) {
+        if (!seen.has(g.match_id)) {
+          seen.add(g.match_id);
+          toInsert.push({
+            user_id: uid,
+            match_id: g.match_id,
+            pool_id: targetPoolId,
+            home_guess: g.home_guess,
+            away_guess: g.away_guess,
+            tiebreaker_pick: g.tiebreaker_pick || null,
+          });
+        }
+      }
+
+      if (toInsert.length > 0) {
+        await supabase
+          .from('guesses')
+          .upsert(toInsert, { onConflict: 'user_id,match_id,pool_id' });
+      }
+    } catch (err) {
+      // Non-critical — pool creation/join succeeds regardless of guess copy result
+      console.warn('[copyUserGuessesToPool]', err);
     }
   };
 
