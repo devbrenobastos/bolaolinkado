@@ -1233,7 +1233,9 @@ export default function App() {
           triggerToast('Permissão de notificação negada. Tente novamente nas configurações do dispositivo.');
           return;
         }
-        const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+        const vapidKey =
+          import.meta.env.VITE_VAPID_PUBLIC_KEY ||
+          'BGvXIDwn2IgG9P9AoMGf_PqhSO-afyCuW3rQ9JK4bnXkRI7IDQ_h7rOHYpjVAl7vgpnjGcFJpByqc97VooAr42g';
         const sub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(vapidKey),
