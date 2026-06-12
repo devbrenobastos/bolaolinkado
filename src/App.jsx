@@ -3698,7 +3698,7 @@ export default function App() {
                     required
                   >
                     <option value="">Selecione um jogo...</option>
-                    {matches
+                    {categorizedMatches
                       .filter(m => !m.is_finished)
                       .map(m => {
                         const kickoffDate = new Date(m.kickoff_time);
