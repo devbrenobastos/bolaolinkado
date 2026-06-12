@@ -326,6 +326,7 @@ export default function App() {
 
   // Pending Approvals State
   const [pendingApprovals, setPendingApprovals] = useState([]);
+  const [managesAnyPool, setManagesAnyPool] = useState(false);
 
   // Management States
   const [targetUserToManage, setTargetUserToManage] = useState(null);
@@ -888,6 +889,8 @@ export default function App() {
 
     const managePoolIds = Array.from(new Set([...ownedIds, ...adminIds]));
     const isGlobalAdmin = profile.role === 'admin';
+
+    setManagesAnyPool(isGlobalAdmin || managePoolIds.length > 0);
 
     let query = supabase
       .from('pool_members')
@@ -1645,13 +1648,14 @@ export default function App() {
 
       if (poolError) throw poolError;
 
-      // Add owner as first member (auto-approved)
+      // Add owner as first member (auto-approved, moderator)
       const { error: memberError } = await supabase
         .from('pool_members')
         .insert({
           pool_id: newPool.id,
           user_id: session.user.id,
-          is_approved: true
+          is_approved: true,
+          role: 'admin',
         });
 
       if (memberError) throw memberError;
@@ -2962,8 +2966,8 @@ export default function App() {
               <h1 className="text-3xl font-bold tracking-tight mt-1">Convites</h1>
             </div>
 
-            {/* Pending approvals section for Premium/Admin users */}
-            {(profile?.role === 'premium' || profile?.role === 'admin') && (
+            {/* Pending approvals section for pool owners/moderators */}
+            {managesAnyPool && (
               <div className="space-y-3">
                 <h2 className="text-sm font-bold text-neutral-400 uppercase tracking-wider mb-2">Solicitações de Entrada</h2>
                 
