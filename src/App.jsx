@@ -1233,6 +1233,12 @@ export default function App() {
           triggerToast('Permissão de notificação negada. Tente novamente nas configurações do dispositivo.');
           return;
         }
+        // Limpar subscrição existente antes de criar nova — evita AbortError no Android
+        // quando há conflito de VAPID key diferente armazenada no browser
+        const existingSub = await reg.pushManager.getSubscription();
+        if (existingSub) {
+          await existingSub.unsubscribe();
+        }
         const vapidKey =
           import.meta.env.VITE_VAPID_PUBLIC_KEY ||
           'BGvXIDwn2IgG9P9AoMGf_PqhSO-afyCuW3rQ9JK4bnXkRI7IDQ_h7rOHYpjVAl7vgpnjGcFJpByqc97VooAr42g';
@@ -3802,11 +3808,18 @@ export default function App() {
           <span className="text-[10px] font-bold">Ranking</span>
         </button>
 
-        <button 
+        <button
           onClick={() => setActiveTab('convites')}
           className={`flex flex-col items-center gap-1 transition-colors relative ${activeTab === 'convites' ? 'text-[#FF7A00]' : 'text-neutral-500 hover:text-white'}`}
         >
-          <Bell className="w-5 h-5" />
+          <div className="relative">
+            <Bell className="w-5 h-5" />
+            {pendingApprovals.length > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-0.5 leading-none">
+                {pendingApprovals.length > 99 ? '99+' : pendingApprovals.length}
+              </span>
+            )}
+          </div>
           <span className="text-[10px] font-bold">Convites</span>
         </button>
 
