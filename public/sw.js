@@ -1,5 +1,5 @@
 // ============================================
-// Bolão Linkado — Service Worker v3
+// Palpiteiro Nato — Service Worker v3
 // Estratégia: Cache-First para estáticos,
 //             Network-First para navegação,
 //             Push Notifications
@@ -121,7 +121,7 @@ self.addEventListener('fetch', (event) => {
 
 // ——— PUSH: receber notificação do servidor ———
 self.addEventListener('push', (event) => {
-  let data = { title: 'Bolão Linkado', body: 'Você tem uma atualização!', url: '/' };
+  let data = { title: 'Palpiteiro Nato', body: 'Você tem uma atualização!', url: '/' };
 
   if (event.data) {
     try {

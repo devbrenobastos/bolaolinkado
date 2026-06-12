@@ -256,7 +256,11 @@ function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
   const raw = window.atob(base64);
-  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+  const output = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) {
+    output[i] = raw.charCodeAt(i);
+  }
+  return output;
 }
 
 const usePlatform = () => {
@@ -579,8 +583,8 @@ export default function App() {
     if (navigator.share) {
       try {
         await navigator.share({
-          title: 'Bolão Linkado',
-          text: 'Participe do Bolão Linkado e dê seus palpites!',
+          title: 'Palpiteiro Nato',
+          text: 'Participe do Palpiteiro Nato e dê seus palpites!',
           url: window.location.href
         });
       } catch (err) {
@@ -835,17 +839,24 @@ export default function App() {
         console.error('Error fetching pool guesses:', guessesErr);
       } else {
         setPoolGuesses(guesses || []);
-        
-        // Map current user's predictions and tiebreaker picks for quick lookup in UI
-        const preds = {};
-        const tbPicks = {};
-        guesses?.filter(g => g.user_id === session.user.id).forEach(g => {
+      }
+
+      // Load current user's predictions from ALL pools (universal palpites)
+      const { data: myAllGuesses } = await supabase
+        .from('guesses')
+        .select('match_id, home_guess, away_guess, tiebreaker_pick')
+        .eq('user_id', session.user.id);
+
+      const preds = {};
+      const tbPicks = {};
+      myAllGuesses?.forEach(g => {
+        if (!preds[g.match_id]) {
           preds[g.match_id] = { home: g.home_guess, away: g.away_guess };
           if (g.tiebreaker_pick) tbPicks[g.match_id] = g.tiebreaker_pick;
-        });
-        setUserPredictions(preds);
-        setTiebreakerPicks(tbPicks);
-      }
+        }
+      });
+      setUserPredictions(preds);
+      setTiebreakerPicks(tbPicks);
     };
 
     if (selectedPool) {
@@ -908,6 +919,7 @@ export default function App() {
         .eq('user_id', userId);
 
       if (error) throw error;
+      await copyUserGuessesToPool(poolId, userId);
       triggerToast('Membro aprovado com sucesso!');
       await loadPendingApprovals();
     } catch (err) {
@@ -929,6 +941,40 @@ export default function App() {
     } catch (err) {
       console.error(err);
       triggerToast('Erro ao recusar solicitação.');
+    }
+  };
+
+  const copyUserGuessesToPool = async (targetPoolId, targetUserId) => {
+    const uid = targetUserId || session?.user?.id;
+    if (!uid) return;
+    const { data: existingGuesses } = await supabase
+      .from('guesses')
+      .select('match_id, home_guess, away_guess, tiebreaker_pick')
+      .eq('user_id', uid)
+      .neq('pool_id', targetPoolId);
+
+    if (!existingGuesses?.length) return;
+
+    const seen = new Set();
+    const toInsert = [];
+    for (const g of existingGuesses) {
+      if (!seen.has(g.match_id)) {
+        seen.add(g.match_id);
+        toInsert.push({
+          user_id: uid,
+          match_id: g.match_id,
+          pool_id: targetPoolId,
+          home_guess: g.home_guess,
+          away_guess: g.away_guess,
+          tiebreaker_pick: g.tiebreaker_pick || null,
+        });
+      }
+    }
+
+    if (toInsert.length > 0) {
+      await supabase
+        .from('guesses')
+        .upsert(toInsert, { onConflict: 'user_id,match_id,pool_id' });
     }
   };
 
@@ -1155,13 +1201,21 @@ export default function App() {
       triggerToast('Instale o aplicativo primeiro para ativar notificações!');
       return;
     }
-    if (!('PushManager' in window)) {
+    if (!('PushManager' in window) || !('serviceWorker' in navigator)) {
       triggerToast('Notificações Push não são suportadas neste dispositivo.');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      triggerToast('Notificações bloqueadas. Vá em Configurações > Notificações e permita o Palpiteiro Nato.');
       return;
     }
     setPushLoading(true);
     try {
-      const reg = await navigator.serviceWorker.ready;
+      const reg = await navigator.serviceWorker.getRegistration('/');
+      if (!reg) {
+        triggerToast('Service worker não encontrado. Reabra o app e tente novamente.');
+        return;
+      }
       if (pushSubscribed) {
         const sub = await reg.pushManager.getSubscription();
         if (sub) {
@@ -1176,7 +1230,7 @@ export default function App() {
       } else {
         const permission = await Notification.requestPermission();
         if (permission !== 'granted') {
-          triggerToast('Permissão de notificação negada.');
+          triggerToast('Permissão de notificação negada. Tente novamente nas configurações do dispositivo.');
           return;
         }
         const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
@@ -1190,13 +1244,21 @@ export default function App() {
           endpoint: subJson.endpoint,
           p256dh: subJson.keys.p256dh,
           auth: subJson.keys.auth,
-        });
+        }, { onConflict: 'user_id,endpoint' });
         setPushSubscribed(true);
         triggerToast('Notificações ativadas! Você receberá lembretes dos jogos.');
       }
     } catch (err) {
       console.error('[Push]', err);
-      triggerToast('Erro ao configurar notificações. Tente novamente.');
+      if (err.name === 'NotAllowedError') {
+        triggerToast('Permissão negada pelo sistema. Verifique as configurações de notificação.');
+      } else if (err.name === 'AbortError') {
+        triggerToast('Subscrição cancelada. Tente novamente.');
+      } else if (err.name === 'InvalidStateError') {
+        triggerToast('Estado inválido do service worker. Feche e reabra o app.');
+      } else {
+        triggerToast('Erro ao configurar notificações: ' + (err.message || 'Tente novamente.'));
+      }
     } finally {
       setPushLoading(false);
     }
@@ -1606,13 +1668,15 @@ export default function App() {
 
       if (memberError) throw memberError;
 
+      await copyUserGuessesToPool(newPool.id);
+
       setNewPoolName('');
       setNewPoolFee('');
       setNewPoolMode('total');
       setNewPoolIsPrivate(true);
       setIsCreateModalOpen(false);
       triggerToast(`Bolão "${newPool.name}" criado com sucesso!`);
-      
+
       await loadPoolsData();
     } catch (err) {
       console.error(err);
@@ -1664,6 +1728,7 @@ export default function App() {
       if (joinError) throw joinError;
 
       if (!pool.is_private) {
+        await copyUserGuessesToPool(pool.id);
         triggerToast(`Você entrou no bolão "${pool.name}"!`);
       } else {
         triggerToast(`Solicitação enviada para "${pool.name}"! Aguarde aprovação de um membro Premium/Admin.`);
@@ -1745,6 +1810,7 @@ export default function App() {
         });
 
       if (error) throw error;
+      await copyUserGuessesToPool(pool.id);
       triggerToast(`Você entrou no bolão "${pool.name}"!`);
       setIsBrowseModalOpen(false);
       await loadPoolsData();
@@ -1774,7 +1840,7 @@ export default function App() {
               <Trophy className="w-8 h-8 text-[#FF7A00]" />
             </div>
             <div>
-              <h1 className="text-3xl font-extrabold tracking-tight text-white">Bolão Linka</h1>
+              <h1 className="text-3xl font-extrabold tracking-tight text-white">Palpiteiro Nato</h1>
               <p className="text-sm text-neutral-400 mt-2">Dê seus palpites e dispute com seus amigos!</p>
             </div>
 
@@ -3132,7 +3198,7 @@ export default function App() {
                   <h4 className="text-sm font-bold text-white">Instalar Aplicativo</h4>
                 </div>
                 <p className="text-[11px] text-neutral-400 leading-normal">
-                  Adicione o Bolão Linkado na tela inicial do seu celular e tenha acesso rápido com experiência de app nativo.
+                  Adicione o Palpiteiro Nato na tela inicial do seu celular e tenha acesso rápido com experiência de app nativo.
                 </p>
                 <button
                   onClick={handlePwaInstallClick}
@@ -3752,7 +3818,7 @@ export default function App() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Smartphone className="w-5 h-5 text-[#FF7A00]" />
-                <h3 className="text-base font-bold text-white">Instalar no iPhone</h3>
+                <h3 className="text-base font-bold text-white">Instalar Palpiteiro Nato</h3>
               </div>
               <button onClick={() => setIsInstallModalOpen(false)} className="text-neutral-500 hover:text-white p-1">
                 <X className="w-5 h-5" />
@@ -3801,8 +3867,8 @@ export default function App() {
                   onClick={async () => {
                     try {
                       await navigator.share({
-                        title: 'Bolão Linkado',
-                        text: 'Adicione o Bolão Linkado à sua tela inicial!',
+                        title: 'Palpiteiro Nato',
+                        text: 'Adicione o Palpiteiro Nato à sua tela inicial!',
                         url: window.location.href,
                       });
                     } catch {

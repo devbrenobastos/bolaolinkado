@@ -1,8 +1,8 @@
 {
-  "name": "Bolão Linkado",
-  "short_name": "Bolão",
+  "name": "Palpiteiro Nato",
+  "short_name": "Palpiteiro",
   "id": "/",
-  "description": "Faça seus palpites da Copa do Mundo 2026 e dispute com seus amigos!",
+  "description": "Faça seus palpites da Copa do Mundo 2026 e dispute com seus amigos no Palpiteiro Nato!",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
