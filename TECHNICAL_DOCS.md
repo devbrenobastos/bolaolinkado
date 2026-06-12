@@ -625,3 +625,14 @@ Tour navega automaticamente entre abas conforme o usuário avança. Fechar/pular
 5. **iOS Web Push** exige `aes128gcm` obrigatoriamente. **Não usar `aesgcm` (legado)** nem `npm:web-push` (não funciona em Deno). A implementação atual com `crypto.subtle` é a solução correta.
 
 6. **O scoring (pontos)** é calculado por trigger no banco — nunca calcular no client. Se precisar depurar pontuações erradas, investigar o trigger `calculate_guess_points`.
+
+7. **Monetização e Gateways de Pagamento (Futuro)**:
+   - **Status Atual**: A criação dos bolões nas novas modalidades `'day'` (Por Dia) e `'match'` (Jogo Único) está temporariamente liberada de forma gratuita para todos os usuários para fins de teste/experimento, visto que ainda não há um gateway de pagamento vinculado ao sistema.
+   - **Sugestão de Fluxo**: No futuro, pode-se limitar a criação de bolões dessas modalidades apenas a usuários com a role `'premium'` ou `'admin'`.
+   - **Integração do Gateway**: Recomenda-se integrar um gateway de pagamento (ex: Stripe, Asaas ou Mercado Pago para PIX) via Supabase Edge Functions. O fluxo seria:
+     1. O usuário solicita o upgrade para `'premium'` no app.
+     2. Uma Edge Function gera a cobrança/PIX e retorna o QR Code/link.
+     3. O gateway envia um webhook de confirmação de pagamento para outra Edge Function do Supabase.
+     4. A Edge Function atualiza a coluna `role` do usuário em `profiles` para `'premium'`.
+   - **Restrições**: A validação final deve ser feita no banco de dados por meio da trigger `check_pool_creation_limits`, impedindo a inserção de bolões premium por usuários comuns, acompanhado de um aviso/bloqueio visual na interface (UI).
+
