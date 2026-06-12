@@ -665,6 +665,17 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Polling fallback: re-fetch matches every 60s to catch live score updates
+  // if the Realtime WebSocket drops (common on mobile/PWA background/foreground)
+  useEffect(() => {
+    if (!session) return;
+    const interval = setInterval(async () => {
+      const { data } = await supabase.from('matches').select('*').order('kickoff_time', { ascending: true });
+      if (data) setMatches(data);
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [session]);
+
   // Realtime subscription for matches and guesses
   useEffect(() => {
     if (!session) return;
@@ -1637,7 +1648,11 @@ export default function App() {
   // Create pool handler
   const handleCreatePool = async (e) => {
     e.preventDefault();
-    if (!newPoolName.trim() || !session || !profile) return;
+    if (!newPoolName.trim() || !session) return;
+    if (!profile) {
+      triggerToast('Aguarde um momento enquanto seu perfil é carregado e tente novamente.');
+      return;
+    }
 
     // Generate random 8-character unique Invite Code
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -2822,9 +2837,7 @@ export default function App() {
                 <div className="space-y-1">
                   <h3 className="text-base font-bold text-white">Nenhum Bolão Encontrado</h3>
                   <p className="text-xs text-neutral-400 max-w-xs mx-auto">
-                    {profile?.role === 'user' 
-                      ? 'Você ainda não participa de nenhuma liga. Entre em uma liga utilizando um código de convite acima!' 
-                      : 'Você ainda não participa de nenhuma liga. Crie seu primeiro bolão ou entre em um existente!'}
+                    Você ainda não participa de nenhuma liga. Crie seu primeiro bolão ou entre em um existente com um código de convite!
                   </p>
                 </div>
                   <button
