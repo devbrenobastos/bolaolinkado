@@ -1764,8 +1764,8 @@ export default function App() {
       randomLink += characters.charAt(Math.floor(Math.random() * characters.length));
     }
 
-    const feeVal = isAdminUser ? 0 : (newPoolFee ? parseFloat(newPoolFee) : 0);
-    const isPrivate = isAdminUser ? true : newPoolIsPrivate;
+    const feeVal = newPoolFee ? parseFloat(newPoolFee) : 0;
+    const isPrivate = newPoolIsPrivate;
 
     try {
       const { data: newPool, error: poolError } = await supabase
@@ -3555,20 +3555,18 @@ export default function App() {
                 />
               </div>
 
-              {profile?.role !== 'admin' && (
-                <div className="space-y-1.5">
-                  <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Taxa de Entrada (R$)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="Ex: 20.00 (deixe vazio para Grátis)"
-                    value={newPoolFee}
-                    onChange={(e) => { setNewPoolFee(e.target.value); setShowPublicConfirm(false); }}
-                    className="w-full bg-[#1D1D1D] border border-[#262626] rounded-sm px-3.5 py-3.5 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-[#FF7A00] transition-colors"
-                  />
-                </div>
-              )}
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Taxa de Entrada (R$)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="Ex: 20.00 (deixe vazio para Grátis)"
+                  value={newPoolFee}
+                  onChange={(e) => { setNewPoolFee(e.target.value); setShowPublicConfirm(false); }}
+                  className="w-full bg-[#1D1D1D] border border-[#262626] rounded-sm px-3.5 py-3.5 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-[#FF7A00] transition-colors"
+                />
+              </div>
 
               <div className="space-y-1.5">
                 <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Modalidade do Bolão</label>
@@ -3600,62 +3598,55 @@ export default function App() {
                 </div>
               </div>
 
-              {profile?.role === 'admin' ? (
-                <div className="flex items-center gap-2 bg-[#1D1D1D] border border-[#262626] rounded-sm px-3.5 py-3 text-xs text-neutral-400">
-                  <Check className="w-4 h-4 text-[#FF7A00] shrink-0" />
-                  <span>Bolão <strong className="text-white">Apenas Convidados</strong> — entrada por código de convite, sem taxa.</span>
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Privacidade do Bolão</label>
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  <button
+                    type="button"
+                    onClick={() => { setNewPoolIsPrivate(true); setShowPublicConfirm(false); }}
+                    className={`flex flex-col items-center justify-center p-3 rounded-sm border transition-all text-center ${
+                      newPoolIsPrivate
+                        ? 'border-[#FF7A00] bg-[#FF7A00]/10 text-white'
+                        : 'border-[#262626] bg-[#1D1D1D] text-neutral-400 hover:border-neutral-700'
+                    }`}
+                  >
+                    <span className="text-xs font-bold">Apenas Convidados</span>
+                    <span className="text-[9px] text-neutral-500 mt-1">Código de convite e aprovação</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setNewPoolIsPrivate(false); setShowPublicConfirm(false); }}
+                    className={`flex flex-col items-center justify-center p-3 rounded-sm border transition-all text-center ${
+                      !newPoolIsPrivate
+                        ? 'border-[#FF7A00] bg-[#FF7A00]/10 text-white'
+                        : 'border-[#262626] bg-[#1D1D1D] text-neutral-400 hover:border-neutral-700'
+                    }`}
+                  >
+                    <span className="text-xs font-bold">Livre (Público)</span>
+                    <span className="text-[9px] text-neutral-500 mt-1">Entrada livre, sem aprovação</span>
+                  </button>
                 </div>
-              ) : (
-                <div className="space-y-1.5">
-                  <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Privacidade do Bolão</label>
-                  <div className="grid grid-cols-2 gap-2 mt-1">
-                    <button
-                      type="button"
-                      onClick={() => { setNewPoolIsPrivate(true); setShowPublicConfirm(false); }}
-                      className={`flex flex-col items-center justify-center p-3 rounded-sm border transition-all text-center ${
-                        newPoolIsPrivate
-                          ? 'border-[#FF7A00] bg-[#FF7A00]/10 text-white'
-                          : 'border-[#262626] bg-[#1D1D1D] text-neutral-400 hover:border-neutral-700'
-                      }`}
-                    >
-                      <span className="text-xs font-bold">Apenas Convidados</span>
-                      <span className="text-[9px] text-neutral-500 mt-1">Código de convite e aprovação</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setNewPoolIsPrivate(false); setShowPublicConfirm(false); }}
-                      className={`flex flex-col items-center justify-center p-3 rounded-sm border transition-all text-center ${
-                        !newPoolIsPrivate
-                          ? 'border-[#FF7A00] bg-[#FF7A00]/10 text-white'
-                          : 'border-[#262626] bg-[#1D1D1D] text-neutral-400 hover:border-neutral-700'
-                      }`}
-                    >
-                      <span className="text-xs font-bold">Livre (Público)</span>
-                      <span className="text-[9px] text-neutral-500 mt-1">Entrada livre, sem aprovação</span>
-                    </button>
-                  </div>
 
-                  {/* Autoaprovação — visível para bolões privados */}
-                  {newPoolIsPrivate && (
-                    <label className="flex items-start gap-2.5 mt-3 cursor-pointer select-none group">
-                      <div className="relative shrink-0 mt-0.5">
-                        <input type="checkbox" checked={newPoolAutoApprove} onChange={(e) => setNewPoolAutoApprove(e.target.checked)} className="sr-only" />
-                        <div className={`w-4 h-4 rounded border transition-all ${newPoolAutoApprove ? 'bg-[#FF7A00] border-[#FF7A00]' : 'bg-[#1D1D1D] border-[#444] group-hover:border-[#FF7A00]/50'}`}>
-                          {newPoolAutoApprove && (
-                            <svg viewBox="0 0 12 12" className="w-full h-full p-0.5" fill="none" stroke="black" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="2,6 5,9 10,3" />
-                            </svg>
-                          )}
-                        </div>
+                {/* Autoaprovação — visível para bolões privados */}
+                {newPoolIsPrivate && (
+                  <label className="flex items-start gap-2.5 mt-3 cursor-pointer select-none group">
+                    <div className="relative shrink-0 mt-0.5">
+                      <input type="checkbox" checked={newPoolAutoApprove} onChange={(e) => setNewPoolAutoApprove(e.target.checked)} className="sr-only" />
+                      <div className={`w-4 h-4 rounded border transition-all ${newPoolAutoApprove ? 'bg-[#FF7A00] border-[#FF7A00]' : 'bg-[#1D1D1D] border-[#444] group-hover:border-[#FF7A00]/50'}`}>
+                        {newPoolAutoApprove && (
+                          <svg viewBox="0 0 12 12" className="w-full h-full p-0.5" fill="none" stroke="black" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="2,6 5,9 10,3" />
+                          </svg>
+                        )}
                       </div>
-                      <div>
-                        <span className="text-xs font-semibold text-white">Autoaprovação</span>
-                        <p className="text-[10px] text-neutral-500 mt-0.5 leading-relaxed">Quem entrar pelo código de convite já é aprovado automaticamente, sem precisar de moderador.</p>
-                      </div>
-                    </label>
-                  )}
-                </div>
-              )}
+                    </div>
+                    <div>
+                      <span className="text-xs font-semibold text-white">Autoaprovação</span>
+                      <p className="text-[10px] text-neutral-500 mt-0.5 leading-relaxed">Quem entrar pelo código de convite já é aprovado automaticamente, sem precisar de moderador.</p>
+                    </div>
+                  </label>
+                )}
+              </div>
 
               {/* Confirmação "Deixar público?" para não-admins sem taxa */}
               {showPublicConfirm && profile?.role !== 'admin' && (

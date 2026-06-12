@@ -167,8 +167,8 @@ Cada bolão criado por um usuário.
 | `auto_approve` | boolean | `false` | Aprovação automática de membros |
 
 **Regras de negócio:**
-- Admin users: criação sempre `is_private = true`, `entry_fee = 0`. Form simplificado no UI.
-- Não-admin sem taxa: modal intercepta submit e pergunta "Deixar público?" antes de criar.
+- Admin users: criação de bolão livre ou privado, com ou sem taxa de entrada. Usa o formulário completo no UI.
+- Não-admin sem taxa: modal intercepta submit e pergunta "Deixar público?" antes de criar. Restrição imposta no banco pela trigger `check_pool_creation_limits` (impede bolão grátis privado).
 - Pools com `is_private = false` aparecem na listagem de bolões públicos.
 - Pools com `is_private = true` só são acessíveis via `invite_code`.
 
@@ -550,7 +550,7 @@ Tour navega automaticamente entre abas conforme o usuário avança. Fechar/pular
 | Palpite rota fecha 15min antes do kickoff | Client (`isMatchLocked`) + trigger `enforce_guess_lockout` |
 | Palpites universais entre bolões | Client (`handleUserPredictionChange` bulk upsert em rede) |
 | Palpite alheio visível só após bloqueio | RLS policy em `guesses` (SELECT) |
-| Admin cria apenas bolão privado sem taxa | Client (`handleCreatePool` + form condicional) |
+| Admin cria bolão com qualquer privacidade/taxa | Client (`handleCreatePool`) |
 | Não-admin sem taxa: confirmação "Deixar público?" | Client (`showPublicConfirm` state) |
 | Bolão público = `is_private = false` | Campo `pools.is_private` |
 | Aprovação de membros: manual ou automática | `pools.auto_approve` + `pool_members.is_approved` |
