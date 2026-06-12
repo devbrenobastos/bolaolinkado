@@ -3815,6 +3815,7 @@ export default function App() {
             className="bg-[#151515] border border-[#262626] rounded-xl p-5 w-full max-w-md space-y-4 mb-2"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* Header */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Smartphone className="w-5 h-5 text-[#FF7A00]" />
@@ -3824,30 +3825,45 @@ export default function App() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <p className="text-[12px] text-neutral-400 leading-relaxed">
-              Toque em <span className="text-white font-semibold">Instalar Agora</span> para abrir as opções do Safari e depois selecione <span className="text-white font-semibold">"Adicionar à Tela de Início"</span>.
-            </p>
+
+            {/* Destaque visual: ícone nativo do Safari */}
+            <div className="bg-[#1A1A1A] border border-[#FF7A00]/30 rounded-lg p-3 flex items-center gap-3">
+              {/* Ícone de compartilhar do Safari (SVG nativo) */}
+              <div className="w-10 h-10 rounded-xl bg-[#FF7A00] flex items-center justify-center shrink-0">
+                <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+                  <polyline points="16 6 12 2 8 6" />
+                  <line x1="12" y1="2" x2="12" y2="15" />
+                </svg>
+              </div>
+              <div>
+                <p className="text-[13px] font-bold text-white leading-tight">Toque no ícone de compartilhar</p>
+                <p className="text-[11px] text-neutral-400 mt-0.5">Na barra inferior do Safari (⬆ seta para cima)</p>
+              </div>
+            </div>
+
+            {/* Passos */}
             <div className="space-y-3">
               {[
                 {
                   num: 1,
-                  text: 'Toque em "Instalar Agora" abaixo',
-                  sub: 'Vai abrir o menu de compartilhamento do Safari',
+                  text: 'Toque no ícone ⬆ do Safari',
+                  sub: 'Barra de ferramentas na parte inferior do Safari',
                 },
                 {
                   num: 2,
-                  text: 'Role e toque em "Adicionar à Tela de Início"',
-                  sub: 'Pode precisar rolar a lista de opções para encontrar',
+                  text: 'Role a lista e toque em "Adicionar à Tela de Início"',
+                  sub: 'Fica na linha de ações, role para o lado se não aparecer',
                 },
                 {
                   num: 3,
-                  text: 'Toque em "Adicionar" no canto superior direito',
-                  sub: 'O ícone do app será salvo na tela inicial',
+                  text: 'Confirme tocando em "Adicionar"',
+                  sub: 'O ícone do Palpiteiro Nato será salvo na tela inicial',
                 },
                 {
                   num: 4,
                   text: 'Abra sempre pelo ícone na tela inicial',
-                  sub: 'Assim você tem a experiência completa de app nativo',
+                  sub: 'Experiência completa de app, sem barra do Safari',
                 },
               ].map(({ num, text, sub }) => (
                 <div key={num} className="flex gap-3 items-start">
@@ -3861,31 +3877,14 @@ export default function App() {
                 </div>
               ))}
             </div>
+
+            {/* Botões */}
             <div className="space-y-2 pt-1">
-              {typeof navigator !== 'undefined' && navigator.share && (
-                <button
-                  onClick={async () => {
-                    try {
-                      await navigator.share({
-                        title: 'Palpiteiro Nato',
-                        text: 'Adicione o Palpiteiro Nato à sua tela inicial!',
-                        url: window.location.href,
-                      });
-                    } catch {
-                      // Usuário cancelou ou erro — sem ação
-                    }
-                  }}
-                  className="w-full bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-sm py-3 rounded-sm active:scale-95 transition-all flex items-center justify-center gap-2 shadow-[0_0_16px_rgba(255,122,0,0.3)]"
-                >
-                  <Share2 className="w-4 h-4 text-black" />
-                  Instalar Agora
-                </button>
-              )}
               <button
                 onClick={() => setIsInstallModalOpen(false)}
-                className="w-full text-neutral-500 text-sm py-2 active:scale-95 transition-all"
+                className="w-full bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-sm py-3 rounded-sm active:scale-95 transition-all flex items-center justify-center gap-2 shadow-[0_0_16px_rgba(255,122,0,0.3)]"
               >
-                Fechar
+                Entendi, vou instalar!
               </button>
             </div>
           </div>
