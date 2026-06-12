@@ -288,6 +288,7 @@ export default function App() {
   const [newPoolFee, setNewPoolFee] = useState('');
   const [newPoolMode, setNewPoolMode] = useState('total'); // total, round
   const [newPoolIsPrivate, setNewPoolIsPrivate] = useState(true); // true = private/convite, false = public/libre
+  const [newPoolAutoApprove, setNewPoolAutoApprove] = useState(false);
   const [isBrowseModalOpen, setIsBrowseModalOpen] = useState(false);
   const [publicPools, setPublicPools] = useState([]);
   const [browseLoading, setBrowseLoading] = useState(false);
@@ -1641,7 +1642,8 @@ export default function App() {
           entry_fee: feeVal,
           invite_code: randomLink,
           mode: newPoolMode,
-          is_private: isPrivate
+          is_private: isPrivate,
+          auto_approve: isPrivate ? newPoolAutoApprove : false,
         })
         .select()
         .single();
@@ -1666,6 +1668,7 @@ export default function App() {
       setNewPoolFee('');
       setNewPoolMode('total');
       setNewPoolIsPrivate(true);
+      setNewPoolAutoApprove(false);
       setIsCreateModalOpen(false);
       triggerToast(`Bolão "${newPool.name}" criado com sucesso!`);
 
@@ -1709,21 +1712,23 @@ export default function App() {
         return;
       }
 
+      const autoApproved = !pool.is_private || !!pool.auto_approve;
+
       const { error: joinError } = await supabase
         .from('pool_members')
         .insert({
           pool_id: pool.id,
           user_id: session.user.id,
-          is_approved: !pool.is_private
+          is_approved: autoApproved,
         });
 
       if (joinError) throw joinError;
 
-      if (!pool.is_private) {
+      if (autoApproved) {
         await copyUserGuessesToPool(pool.id);
         triggerToast(`Você entrou no bolão "${pool.name}"!`);
       } else {
-        triggerToast(`Solicitação enviada para "${pool.name}"! Aguarde aprovação de um membro Premium/Admin.`);
+        triggerToast(`Solicitação enviada para "${pool.name}"! Aguarde aprovação do moderador.`);
       }
       setInviteCodeInput('');
       await loadPoolsData();
@@ -3395,6 +3400,31 @@ export default function App() {
                 </div>
                 {(!newPoolFee || parseFloat(newPoolFee) === 0) && (
                   <span className="text-[9px] text-neutral-500 mt-1 block">Bolões grátis devem obrigatoriamente ser de entrada livre.</span>
+                )}
+
+                {/* Autoaprovação — só visível quando "Apenas Convidados" está selecionado */}
+                {newPoolIsPrivate && newPoolFee && parseFloat(newPoolFee) > 0 && (
+                  <label className="flex items-start gap-2.5 mt-3 cursor-pointer select-none group">
+                    <div className="relative shrink-0 mt-0.5">
+                      <input
+                        type="checkbox"
+                        checked={newPoolAutoApprove}
+                        onChange={(e) => setNewPoolAutoApprove(e.target.checked)}
+                        className="sr-only"
+                      />
+                      <div className={`w-4 h-4 rounded border transition-all ${newPoolAutoApprove ? 'bg-[#FF7A00] border-[#FF7A00]' : 'bg-[#1D1D1D] border-[#444] group-hover:border-[#FF7A00]/50'}`}>
+                        {newPoolAutoApprove && (
+                          <svg viewBox="0 0 12 12" className="w-full h-full p-0.5" fill="none" stroke="black" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="2,6 5,9 10,3" />
+                          </svg>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-xs font-semibold text-white">Autoaprovação</span>
+                      <p className="text-[10px] text-neutral-500 mt-0.5 leading-relaxed">Quem entrar pelo código de convite já é aprovado automaticamente, sem precisar de moderador.</p>
+                    </div>
+                  </label>
                 )}
               </div>
 
