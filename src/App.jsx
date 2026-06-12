@@ -352,6 +352,7 @@ export default function App() {
 
   // Join pool by code state
   const [inviteCodeInput, setInviteCodeInput] = useState('');
+  const [isJoiningPool, setIsJoiningPool] = useState(false);
 
   // History states
   const [historyGuesses, setHistoryGuesses] = useState([]);
@@ -1415,19 +1416,22 @@ export default function App() {
     }));
 
     try {
-      // Bulk upsert across all user pools to keep predictions universal
-      const upsertPromises = pools.map(pool => {
-        return supabase
+      // Otimização de Escala: Bulk upsert em uma única chamada de rede
+      const guessesToUpsert = pools.map(pool => ({
+        user_id: session.user.id,
+        match_id: matchId,
+        pool_id: pool.id,
+        home_guess: cleanHome,
+        away_guess: cleanAway
+      }));
+
+      if (guessesToUpsert.length > 0) {
+        const { error: upsertErr } = await supabase
           .from('guesses')
-          .upsert({
-            user_id: session.user.id,
-            match_id: matchId,
-            pool_id: pool.id,
-            home_guess: cleanHome,
-            away_guess: cleanAway
-          }, { onConflict: 'user_id,match_id,pool_id' });
-      });
-      await Promise.all(upsertPromises);
+          .upsert(guessesToUpsert, { onConflict: 'user_id,match_id,pool_id' });
+        
+        if (upsertErr) throw upsertErr;
+      }
 
       // Reload pool guesses to keep state in sync
       const { data: updatedGuesses } = await supabase
@@ -1726,61 +1730,43 @@ export default function App() {
 
   const handleJoinPoolByCode = async (e) => {
     e.preventDefault();
-    if (!inviteCodeInput.trim() || !session) return;
+    if (!inviteCodeInput.trim() || !session || isJoiningPool) return;
 
+    setIsJoiningPool(true);
     try {
-      const { data: pool, error: searchError } = await supabase
-        .from('pools')
-        .select('*')
-        .eq('invite_code', inviteCodeInput.trim())
-        .maybeSingle();
+      // Chama a RPC segura do banco que executa a transação e possui proteção contra força bruta
+      const { data, error } = await supabase.rpc('join_pool_by_invite_code', {
+        invite_code_input: inviteCodeInput.trim()
+      });
 
-      if (searchError || !pool) {
-        triggerToast('Código de convite inválido ou não encontrado.');
+      if (error) {
+        triggerToast(error.message || 'Código de convite inválido ou não encontrado.');
+        // Aplica o cooldown de 3 segundos no client para prevenir abusos de cliques
+        setTimeout(() => setIsJoiningPool(false), 3000);
         return;
       }
 
-      // Check if already a member
-      const { data: existingMember } = await supabase
-        .from('pool_members')
-        .select('*')
-        .eq('pool_id', pool.id)
-        .eq('user_id', session.user.id)
-        .maybeSingle();
+      setIsJoiningPool(false);
 
-      if (existingMember) {
-        if (existingMember.is_approved) {
-          triggerToast('Você já participa deste bolão!');
+      if (data) {
+        if (data.success) {
+          if (data.is_approved) {
+            await copyUserGuessesToPool(data.pool_id);
+            triggerToast(`Você entrou no bolão "${data.pool_name}"!`);
+          } else {
+            triggerToast(`Solicitação enviada para "${data.pool_name}"! Aguarde aprovação do moderador.`);
+          }
+          setInviteCodeInput('');
+          await loadPoolsData();
+          setActiveTab('boloes');
         } else {
-          triggerToast('Sua solicitação de entrada já está pendente.');
+          triggerToast(data.message);
         }
-        return;
       }
-
-      const autoApproved = !pool.is_private || !!pool.auto_approve;
-
-      const { error: joinError } = await supabase
-        .from('pool_members')
-        .insert({
-          pool_id: pool.id,
-          user_id: session.user.id,
-          is_approved: autoApproved,
-        });
-
-      if (joinError) throw joinError;
-
-      if (autoApproved) {
-        await copyUserGuessesToPool(pool.id);
-        triggerToast(`Você entrou no bolão "${pool.name}"!`);
-      } else {
-        triggerToast(`Solicitação enviada para "${pool.name}"! Aguarde aprovação do moderador.`);
-      }
-      setInviteCodeInput('');
-      await loadPoolsData();
-      setActiveTab('boloes');
     } catch (err) {
       console.error(err);
       triggerToast('Erro ao entrar no bolão.');
+      setTimeout(() => setIsJoiningPool(false), 3000);
     }
   };
 
@@ -2749,16 +2735,18 @@ export default function App() {
                     type="text" 
                     maxLength="8"
                     required
-                    placeholder="Ex: XF92A7B8"
+                    disabled={isJoiningPool}
+                    placeholder={isJoiningPool ? "Aguarde..." : "Ex: XF92A7B8"}
                     value={inviteCodeInput}
                     onChange={(e) => setInviteCodeInput(e.target.value.toUpperCase())}
-                    className="flex-1 bg-[#1D1D1D] border border-[#262626] rounded-sm px-3.5 py-2.5 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-[#FF7A00] transition-colors uppercase"
+                    className="flex-1 bg-[#1D1D1D] border border-[#262626] rounded-sm px-3.5 py-2.5 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-[#FF7A00] transition-colors uppercase disabled:opacity-50"
                   />
                   <button
                     type="submit"
-                    className="bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-xs px-4 py-2.5 rounded-sm active:scale-95 transition-all"
+                    disabled={isJoiningPool}
+                    className="bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-xs px-4 py-2.5 rounded-sm active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Entrar
+                    {isJoiningPool ? 'Entrando...' : 'Entrar'}
                   </button>
                 </form>
               </div>
