@@ -162,15 +162,21 @@ Cada bolão criado por um usuário.
 | `entry_fee` | numeric | `0` | Taxa de entrada (R$) |
 | `invite_code` | text | md5 aleatório (8 chars) | Código de convite |
 | `created_at` | timestamptz | now() | Data de criação |
-| `mode` | text | `'total'` | `'total'` ou `'round'` |
+| `mode` | text | `'total'` | `'total'`, `'round'`, `'day'` ou `'match'` |
 | `is_private` | boolean | `true` | Privado (convite) ou público |
 | `auto_approve` | boolean | `false` | Aprovação automática de membros |
+| `match_id` | bigint | null | FK → matches.id (partida específica se mode = 'match') |
 
 **Regras de negócio:**
 - Admin users: criação de bolão livre ou privado, com ou sem taxa de entrada. Usa o formulário completo no UI.
 - Não-admin sem taxa: modal intercepta submit e pergunta "Deixar público?" antes de criar. Restrição imposta no banco pela trigger `check_pool_creation_limits` (impede bolão grátis privado).
 - Pools com `is_private = false` aparecem na listagem de bolões públicos.
 - Pools com `is_private = true` só são acessíveis via `invite_code`.
+- **Modalidades de Bolão**:
+  * `'total'`: Classificação acumula pontos de todos os jogos do início ao fim.
+  * `'round'`: Classificação filtra e computa apenas jogos da rodada selecionada.
+  * `'day'`: Classificação computa apenas jogos do dia atual e zera/finaliza ao final do dia.
+  * `'match'`: Foca em uma partida única (`match_id`). O ranking encerra ao fim do jogo coroando o vencedor.
 
 ---
 

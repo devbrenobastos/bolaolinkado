@@ -328,6 +328,7 @@ export default function App() {
   const [newPoolMode, setNewPoolMode] = useState('total'); // total, round
   const [newPoolIsPrivate, setNewPoolIsPrivate] = useState(true); // true = private/convite, false = public/libre
   const [newPoolAutoApprove, setNewPoolAutoApprove] = useState(false);
+  const [newPoolMatchId, setNewPoolMatchId] = useState('');
   const [isBrowseModalOpen, setIsBrowseModalOpen] = useState(false);
   const [publicPools, setPublicPools] = useState([]);
   const [browseLoading, setBrowseLoading] = useState(false);
@@ -499,11 +500,23 @@ export default function App() {
   }, [matches]);
 
   const filteredMatches = React.useMemo(() => {
+    if (selectedPool?.mode === 'match') {
+      return categorizedMatches.filter(m => m.id === selectedPool.match_id).map(m => ({
+        ...m,
+        subphaseLabel: 'Partida Única do Bolão'
+      }));
+    }
+    if (selectedPool?.mode === 'day') {
+      return categorizedMatches.filter(m => dayjs(m.kickoff_time).isSame(dayjs(CURRENT_TIME), 'day')).map(m => ({
+        ...m,
+        subphaseLabel: 'Partidas de Hoje'
+      }));
+    }
     if (selectedPhaseFilter === 'all') {
       return categorizedMatches;
     }
     return categorizedMatches.filter(m => m.phaseKey === selectedPhaseFilter);
-  }, [categorizedMatches, selectedPhaseFilter]);
+  }, [categorizedMatches, selectedPhaseFilter, selectedPool]);
 
   const groupedMatches = React.useMemo(() => {
     const groups = [];
@@ -1668,6 +1681,15 @@ export default function App() {
           }
         }
 
+        if (selectedPool.mode === 'day') {
+          const isSameDay = dayjs(match.kickoff_time).isSame(dayjs(CURRENT_TIME), 'day');
+          if (!isSameDay) return;
+        }
+
+        if (selectedPool.mode === 'match') {
+          if (match.id !== selectedPool.match_id) return;
+        }
+
         // Find guess for this participant
         const guess = poolGuesses.find(g => g.user_id === pProfile.id && g.match_id === match.id);
         if (!guess) return;
@@ -1740,6 +1762,22 @@ export default function App() {
 
   const standings = getStandings();
 
+  const isPoolFinished = () => {
+    if (!selectedPool) return false;
+    if (selectedPool.mode === 'match') {
+      const match = matches.find(m => m.id === selectedPool.match_id);
+      return match ? match.is_finished : false;
+    }
+    if (selectedPool.mode === 'day') {
+      const todayMatches = matches.filter(m => dayjs(m.kickoff_time).isSame(dayjs(CURRENT_TIME), 'day'));
+      return todayMatches.length > 0 && todayMatches.every(m => m.is_finished);
+    }
+    return false;
+  };
+
+  const poolFinished = isPoolFinished();
+  const winners = poolFinished ? standings.filter(p => p.rank === 1) : [];
+
   // Create pool handler
   const handleCreatePool = async (e) => {
     e.preventDefault();
@@ -1767,6 +1805,11 @@ export default function App() {
     const feeVal = newPoolFee ? parseFloat(newPoolFee) : 0;
     const isPrivate = newPoolIsPrivate;
 
+    if (newPoolMode === 'match' && !newPoolMatchId) {
+      triggerToast('Selecione uma partida específica para o bolão.');
+      return;
+    }
+
     try {
       const { data: newPool, error: poolError } = await supabase
         .from('pools')
@@ -1778,6 +1821,7 @@ export default function App() {
           mode: newPoolMode,
           is_private: isPrivate,
           auto_approve: isPrivate ? newPoolAutoApprove : false,
+          match_id: newPoolMode === 'match' ? parseInt(newPoolMatchId, 10) : null,
         })
         .select()
         .single();
@@ -1803,6 +1847,7 @@ export default function App() {
       setNewPoolMode('total');
       setNewPoolIsPrivate(true);
       setNewPoolAutoApprove(false);
+      setNewPoolMatchId('');
       setShowPublicConfirm(false);
       setIsCreateModalOpen(false);
       triggerToast(`Bolão "${newPool.name}" criado com sucesso!`);
@@ -2241,12 +2286,33 @@ export default function App() {
                   <div className="flex justify-between items-start mb-3">
                     <div>
                       <span className="text-[10px] bg-[#262626] text-neutral-300 font-bold px-2 py-1 rounded-pill uppercase tracking-wider">
-                        Rodada 1/6
+                        {selectedPool.mode === 'total' && 'Bolão Acumulado'}
+                        {selectedPool.mode === 'round' && 'Por Rodada'}
+                        {selectedPool.mode === 'day' && 'Por Dia (Hoje)'}
+                        {selectedPool.mode === 'match' && 'Partida Única'}
                       </span>
                       <h4 className="text-lg font-bold text-white mt-2 tracking-tight">{selectedPool.name}</h4>
                     </div>
                     <Trophy className="w-5 h-5 text-[#FF7A00]" />
                   </div>
+
+                  {poolFinished && (
+                    <div className="bg-[#FF7A00]/10 border border-[#FF7A00]/30 rounded-md p-3.5 my-3 flex flex-col items-center gap-1.5 text-center animate-fade-in shadow-[0_0_15px_rgba(255,122,0,0.1)]">
+                      <span className="text-xl">🏆</span>
+                      <div>
+                        <p className="text-[10px] text-[#FF7A00] font-black uppercase tracking-widest">Bolão Finalizado</p>
+                        <p className="text-xs font-bold text-white mt-1">
+                          Vencedor{winners.length > 1 ? 'es' : ''}:{' '}
+                          <span className="text-[#FF7A00] text-sm font-black">
+                            {winners.map(w => w.name).join(', ')}
+                          </span>
+                        </p>
+                        <p className="text-[10px] text-neutral-400 mt-1">
+                          Pontuação final: {winners[0]?.points ?? 0} pts
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Avatar Stack */}
                   <div className="flex items-center gap-3 my-4">
@@ -2272,7 +2338,7 @@ export default function App() {
                   {/* Mini Leaderboard showing 1st, 2nd, 3rd places */}
                   {standings.length > 0 && (
                     <div className="border-t border-[#262626] pt-3 mt-1">
-                      <p className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider mb-2">Pódio Provisório</p>
+                      <p className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider mb-2">{poolFinished ? 'Pódio Final' : 'Pódio Provisório'}</p>
                       <div className="grid grid-cols-3 gap-2">
                         {standings.slice(0, 3).map((item, idx) => (
                           <div key={item.id} className={`bg-[#1D1D1D] p-2 rounded-sm text-center relative ${item.rank === 1 ? 'border-l-2 border-[#FF7A00]' : ''}`}>
@@ -3595,8 +3661,57 @@ export default function App() {
                     <span className="text-xs font-bold">Por Rodada</span>
                     <span className="text-[9px] text-neutral-500 mt-1">Zera a cada rodada/fase</span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewPoolMode('day')}
+                    className={`flex flex-col items-center justify-center p-3 rounded-sm border transition-all text-center ${
+                      newPoolMode === 'day' 
+                        ? 'border-[#FF7A00] bg-[#FF7A00]/10 text-white' 
+                        : 'border-[#262626] bg-[#1D1D1D] text-neutral-400 hover:border-neutral-700'
+                    }`}
+                  >
+                    <span className="text-xs font-bold">Por Dia</span>
+                    <span className="text-[9px] text-neutral-500 mt-1">Apenas jogos de hoje</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewPoolMode('match')}
+                    className={`flex flex-col items-center justify-center p-3 rounded-sm border transition-all text-center ${
+                      newPoolMode === 'match' 
+                        ? 'border-[#FF7A00] bg-[#FF7A00]/10 text-white' 
+                        : 'border-[#262626] bg-[#1D1D1D] text-neutral-400 hover:border-neutral-700'
+                    }`}
+                  >
+                    <span className="text-xs font-bold">Jogo Único</span>
+                    <span className="text-[9px] text-neutral-500 mt-1">Uma partida específica</span>
+                  </button>
                 </div>
               </div>
+
+              {newPoolMode === 'match' && (
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Escolha a Partida</label>
+                  <select
+                    value={newPoolMatchId}
+                    onChange={(e) => setNewPoolMatchId(e.target.value)}
+                    className="w-full bg-[#1D1D1D] border border-[#262626] rounded-sm py-2.5 px-3 text-xs text-white focus:outline-none focus:border-[#FF7A00]"
+                    required
+                  >
+                    <option value="">Selecione um jogo...</option>
+                    {matches
+                      .filter(m => !m.is_finished)
+                      .map(m => {
+                        const kickoffDate = new Date(m.kickoff_time);
+                        const dateFormatted = kickoffDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+                        return (
+                          <option key={m.id} value={m.id}>
+                            {dateFormatted} - {translateTeam(m.home_team)} x {translateTeam(m.away_team)}
+                          </option>
+                        );
+                      })}
+                  </select>
+                </div>
+              )}
 
               <div className="space-y-1.5">
                 <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Privacidade do Bolão</label>
