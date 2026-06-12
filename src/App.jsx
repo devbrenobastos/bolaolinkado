@@ -666,6 +666,25 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Captura ?invite=CODE da URL e persiste no localStorage
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('invite');
+    if (code) {
+      localStorage.setItem('pending_invite_code', code.trim().toUpperCase());
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
+  // Quando sessão fica disponível, executa o ingresso automático se houver código pendente
+  useEffect(() => {
+    if (!session) return;
+    const pendingCode = localStorage.getItem('pending_invite_code');
+    if (!pendingCode) return;
+    localStorage.removeItem('pending_invite_code');
+    joinPoolByCodeSilently(pendingCode);
+  }, [session]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Polling fallback: re-fetch matches every 60s to catch live score updates
   // if the Realtime WebSocket drops (common on mobile/PWA background/foreground)
   useEffect(() => {
@@ -1725,6 +1744,33 @@ export default function App() {
     } catch (err) {
       console.error(err);
       triggerToast('Erro ao criar bolão');
+    }
+  };
+
+  const joinPoolByCodeSilently = async (code) => {
+    if (!code || !session) return;
+    try {
+      const { data, error } = await supabase.rpc('join_pool_by_invite_code', {
+        invite_code_input: code.trim()
+      });
+      if (error) {
+        triggerToast(error.message || 'Código de convite inválido.');
+        return;
+      }
+      if (data?.success) {
+        if (data.is_approved) {
+          await copyUserGuessesToPool(data.pool_id);
+          triggerToast(`Você entrou no bolão "${data.pool_name}"! 🎉`);
+        } else {
+          triggerToast(`Solicitação enviada para "${data.pool_name}"! Aguarde aprovação.`);
+        }
+        await loadPoolsData();
+        setActiveTab('boloes');
+      } else if (data?.message) {
+        triggerToast(data.message);
+      }
+    } catch (err) {
+      console.error('[joinPoolByCodeSilently]', err);
     }
   };
 
@@ -2816,15 +2862,26 @@ export default function App() {
                           <span>PARTICIPANTES</span>
                         </button>
 
-                        <button 
+                        <button
                           onClick={() => {
                             navigator.clipboard.writeText(pool.invite_code);
-                            triggerToast('Código copiado para a área de transferência!');
+                            triggerToast('Código copiado!');
+                          }}
+                          className="flex items-center gap-1 text-[10px] font-bold text-[#FF7A00] hover:text-[#FF8C1A] bg-[#FF7A00]/10 px-2.5 py-1 rounded-sm border border-[#FF7A00]/20"
+                        >
+                          <Key className="w-3 h-3" />
+                          <span>CÓDIGO</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            const link = `${window.location.origin}/?invite=${pool.invite_code}`;
+                            navigator.clipboard.writeText(link);
+                            triggerToast('Link de convite copiado!');
                           }}
                           className="flex items-center gap-1 text-[10px] font-bold text-[#FF7A00] hover:text-[#FF8C1A] bg-[#FF7A00]/10 px-2.5 py-1 rounded-sm border border-[#FF7A00]/20"
                         >
                           <Share2 className="w-3 h-3" />
-                          <span>COPIAR</span>
+                          <span>LINK</span>
                         </button>
                       </div>
                     </div>
