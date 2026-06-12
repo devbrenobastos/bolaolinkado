@@ -1823,11 +1823,17 @@ export default function App() {
   };
 
   return (
-    <div className={`max-w-md w-full min-h-screen mx-auto bg-[#0D0D0D] border-x border-[#262626] text-white flex flex-col justify-between shadow-2xl relative font-sans select-none ${session ? 'pb-[72px]' : ''}`}>
+    <div
+      style={{
+        paddingTop: 'env(safe-area-inset-top, 0px)',
+        paddingBottom: session ? 'calc(72px + env(safe-area-inset-bottom, 0px))' : undefined,
+      }}
+      className="max-w-md w-full min-h-screen mx-auto bg-[#0D0D0D] border-x border-[#262626] text-white flex flex-col justify-between shadow-2xl relative font-sans select-none"
+    >
       
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#2ECC71] text-black px-4 py-3 rounded-sm shadow-lg flex items-center gap-2 font-semibold text-sm animate-fade-in border border-[#2ECC71]/30">
+        <div style={{ top: 'calc(env(safe-area-inset-top, 0px) + 16px)' }} className="fixed left-1/2 -translate-x-1/2 z-50 bg-[#2ECC71] text-black px-4 py-3 rounded-sm shadow-lg flex items-center gap-2 font-semibold text-sm animate-fade-in border border-[#2ECC71]/30">
           <Check className="w-4 h-4" />
           <span>{toastMessage}</span>
         </div>
@@ -3765,7 +3771,13 @@ export default function App() {
       )}
 
       {/* --- PERSISTENT BOTTOM NAVIGATION (Height: 72px) --- */}
-      <nav className="fixed bottom-0 max-w-md w-full h-[72px] bg-[#151515] border-t border-[#262626] flex items-center justify-between px-3 z-40">
+      <nav
+        style={{
+          height: 'calc(72px + env(safe-area-inset-bottom, 0px))',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        }}
+        className="fixed bottom-0 max-w-md w-full bg-[#151515] border-t border-[#262626] flex items-center justify-between px-3 z-40"
+      >
         <button 
           onClick={() => setActiveTab('inicio')}
           className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'inicio' ? 'text-[#FF7A00]' : 'text-neutral-500 hover:text-white'}`}
