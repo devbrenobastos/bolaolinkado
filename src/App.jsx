@@ -252,6 +252,13 @@ const getFormattedDeadline = (kickoffTimeStr) => {
   }
 };
 
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = window.atob(base64);
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
 const usePlatform = () => {
   const [platform, setPlatform] = useState('other');
 
@@ -280,7 +287,8 @@ export default function App() {
   const [isBrowseModalOpen, setIsBrowseModalOpen] = useState(false);
   const [publicPools, setPublicPools] = useState([]);
   const [browseLoading, setBrowseLoading] = useState(false);
-  const [pushReminder, setPushReminder] = useState(true);
+  const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
   const carouselItemRefs = React.useRef({});
   const [isListExpanded, setIsListExpanded] = useState(false);
   const [selectedPhaseFilter, setSelectedPhaseFilter] = useState('all');
@@ -302,6 +310,7 @@ export default function App() {
   // PWA States
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isPwa, setIsPwa] = useState(false);
+  const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
 
   // Edit Profile States
   const [editName, setEditName] = useState('');
@@ -595,6 +604,16 @@ export default function App() {
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
   }, []);
+
+  // Verificar se push já está subscrito ao entrar no app
+  useEffect(() => {
+    if (!isPwa || !session || !('PushManager' in window)) return;
+    navigator.serviceWorker?.ready.then((reg) => {
+      reg.pushManager?.getSubscription().then((sub) => {
+        setPushSubscribed(!!sub);
+      });
+    });
+  }, [isPwa, session]);
 
   // Sync activeTab to localStorage
   useEffect(() => {
@@ -1126,23 +1145,73 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
+  // Push notification toggle — subscribe/unsubscribe
+  const handlePushToggle = async () => {
+    if (!isPwa) {
+      triggerToast('Instale o aplicativo primeiro para ativar notificações!');
+      return;
+    }
+    if (!('PushManager' in window)) {
+      triggerToast('Notificações Push não são suportadas neste dispositivo.');
+      return;
+    }
+    setPushLoading(true);
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      if (pushSubscribed) {
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          await sub.unsubscribe();
+          await supabase
+            .from('push_subscriptions')
+            .delete()
+            .match({ user_id: session.user.id, endpoint: sub.endpoint });
+        }
+        setPushSubscribed(false);
+        triggerToast('Notificações desativadas.');
+      } else {
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          triggerToast('Permissão de notificação negada.');
+          return;
+        }
+        const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapidKey),
+        });
+        const subJson = sub.toJSON();
+        await supabase.from('push_subscriptions').upsert({
+          user_id: session.user.id,
+          endpoint: subJson.endpoint,
+          p256dh: subJson.keys.p256dh,
+          auth: subJson.keys.auth,
+        });
+        setPushSubscribed(true);
+        triggerToast('Notificações ativadas! Você receberá lembretes dos jogos.');
+      }
+    } catch (err) {
+      console.error('[Push]', err);
+      triggerToast('Erro ao configurar notificações. Tente novamente.');
+    } finally {
+      setPushLoading(false);
+    }
+  };
+
+  // Unified smart install handler — works on Android (native prompt) and iOS (guide modal)
   const handlePwaInstallClick = () => {
     if (deferredPrompt) {
+      // Android/Chrome/Edge: mostra o prompt nativo de instalação
       deferredPrompt.prompt();
       deferredPrompt.userChoice.then((choiceResult) => {
         if (choiceResult.outcome === 'accepted') {
-          console.log('User accepted the PWA install prompt');
           setIsPwa(true);
         }
         setDeferredPrompt(null);
       });
     } else {
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-      if (isIOS) {
-        triggerToast('Para instalar: toque em Compartilhar no Safari e selecione "Adicionar à Tela de Início"');
-      } else {
-        triggerToast('Instalação automática PWA não suportada neste navegador.');
-      }
+      // iOS Safari ou outros: abre modal com instrução passo a passo
+      setIsInstallModalOpen(true);
     }
   };
 
@@ -3051,46 +3120,23 @@ export default function App() {
               </form>
             </div>
 
-            {/* PWA / App Installation Controls */}
+            {/* PWA / App Installation Controls — Generic for all platforms */}
             {!isPwa && (
               <div className="bg-[#151515] border border-[#262626] rounded-md p-4 space-y-3">
                 <div className="flex items-center gap-2">
                   <Smartphone className="w-5 h-5 text-[#FF7A00]" />
-                  <h4 className="text-sm font-bold text-white">Instalar Aplicativo PWA</h4>
+                  <h4 className="text-sm font-bold text-white">Instalar Aplicativo</h4>
                 </div>
                 <p className="text-[11px] text-neutral-400 leading-normal">
-                  Instale nosso aplicativo diretamente no seu celular para receber lembretes e alertas em tempo real.
+                  Adicione o Bolão Linkado na tela inicial do seu celular e tenha acesso rápido com experiência de app nativo.
                 </p>
-
-                {/* Show iOS installation guidelines if iOS platform detected */}
-                {/iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream ? (
-                  <div className="space-y-3">
-                    <div className="bg-[#FF7A00]/10 border border-[#FF7A00]/20 rounded-md p-3 text-xs text-[#FF7A00] space-y-1">
-                      <p className="font-bold">Como instalar no iPhone (iOS):</p>
-                      <p className="text-neutral-400 mt-1 leading-normal">
-                        1. Abra esta página no navegador **Safari**.<br/>
-                        2. Toque no botão de **Compartilhar** (ícone quadrado com uma seta para cima).<br/>
-                        3. Role a lista e selecione **"Adicionar à Tela de Início"**.<br/>
-                        4. Toque em **Adicionar** no canto superior direito.
-                      </p>
-                    </div>
-                    <button 
-                      onClick={handleIosShare}
-                      className="w-full bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-xs py-2.5 rounded-sm active:scale-95 transition-all flex items-center justify-center gap-1.5"
-                    >
-                      <Share2 className="w-3.5 h-3.5 text-black" />
-                      <span>Compartilhar e Instalar no iOS 📱</span>
-                    </button>
-                  </div>
-                ) : (
-                  <button 
-                    onClick={handlePwaInstallClick}
-                    className="w-full bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-xs py-2.5 rounded-sm active:scale-95 transition-all flex items-center justify-center gap-1.5"
-                  >
-                    <Download className="w-3.5 h-3.5 text-black" />
-                    <span>Instalar Aplicativo 🚀</span>
-                  </button>
-                )}
+                <button
+                  onClick={handlePwaInstallClick}
+                  className="w-full bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-sm py-3 rounded-sm active:scale-95 transition-all flex items-center justify-center gap-2 shadow-[0_0_16px_rgba(255,122,0,0.3)]"
+                >
+                  <Download className="w-4 h-4 text-black" />
+                  <span>Instalar Aplicativo</span>
+                </button>
               </div>
             )}
 
@@ -3103,24 +3149,20 @@ export default function App() {
                     {!isPwa && <Lock className="w-3.5 h-3.5 text-neutral-500" />}
                   </h4>
                   <p className="text-[11px] text-neutral-400 leading-normal">
-                    {isPwa 
-                      ? 'Lembrete Push: Faltam 30 minutos para o jogo e você não deu seu palpite!'
+                    {isPwa
+                      ? pushSubscribed
+                        ? 'Ativo. Você receberá lembretes 30 min antes dos jogos sem palpite.'
+                        : 'Ative para receber lembretes antes dos jogos sem palpite.'
                       : 'Disponível apenas instalando e abrindo o aplicativo em modo PWA.'}
                   </p>
                 </div>
-                <button 
-                  onClick={() => {
-                    if (!isPwa) {
-                      triggerToast('Notificações de push estão disponíveis apenas no aplicativo PWA instalado!');
-                      return;
-                    }
-                    setPushReminder(!pushReminder);
-                  }}
-                  disabled={!isPwa}
-                  className={`w-11 h-6 rounded-pill transition-colors relative focus:outline-none flex items-center ${isPwa && pushReminder ? 'bg-[#FF7A00]' : 'bg-[#262626] opacity-50 cursor-not-allowed'}`}
+                <button
+                  onClick={handlePushToggle}
+                  disabled={!isPwa || !session || pushLoading}
+                  className={`w-11 h-6 rounded-pill transition-colors relative focus:outline-none flex items-center shrink-0 ${isPwa && pushSubscribed ? 'bg-[#FF7A00]' : 'bg-[#262626]'} ${(!isPwa || !session) ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
-                <span className={`w-5 h-5 rounded-full bg-white shadow-md transform transition-transform duration-200 ${isPwa && pushReminder ? 'translate-x-[22px]' : 'translate-x-0'}`} />
-              </button>
+                  <span className={`w-5 h-5 rounded-full bg-white shadow-md transform transition-transform duration-200 ${isPwa && pushSubscribed ? 'translate-x-[22px]' : 'translate-x-0'}`} />
+                </button>
             </div>
           </div>
 
@@ -3692,6 +3734,72 @@ export default function App() {
           <span className="text-[10px] font-bold">Perfil</span>
         </button>
       </nav>
+
+      {/* Modal de instalação iOS — guia passo a passo */}
+      {isInstallModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm p-4"
+          onClick={() => setIsInstallModalOpen(false)}
+        >
+          <div
+            className="bg-[#151515] border border-[#262626] rounded-xl p-5 w-full max-w-md space-y-4 mb-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Smartphone className="w-5 h-5 text-[#FF7A00]" />
+                <h3 className="text-base font-bold text-white">Instalar no iPhone</h3>
+              </div>
+              <button onClick={() => setIsInstallModalOpen(false)} className="text-neutral-500 hover:text-white p-1">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-[12px] text-neutral-400 leading-relaxed">
+              Siga os passos abaixo no <span className="text-white font-semibold">Safari</span> para adicionar o Bolão Linkado à sua tela inicial:
+            </p>
+            <div className="space-y-3">
+              {[
+                {
+                  num: 1,
+                  text: 'Toque no botão Compartilhar',
+                  sub: 'Ícone de seta para cima na barra inferior do Safari',
+                },
+                {
+                  num: 2,
+                  text: 'Role e toque em "Adicionar à Tela de Início"',
+                  sub: 'Pode precisar rolar a lista de opções para encontrar',
+                },
+                {
+                  num: 3,
+                  text: 'Toque em "Adicionar" no canto superior direito',
+                  sub: 'O ícone do app será salvo na tela inicial',
+                },
+                {
+                  num: 4,
+                  text: 'Abra sempre pelo ícone na tela inicial',
+                  sub: 'Assim você tem a experiência completa de app nativo',
+                },
+              ].map(({ num, text, sub }) => (
+                <div key={num} className="flex gap-3 items-start">
+                  <div className="w-7 h-7 rounded-full bg-[#FF7A00] flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="text-black font-bold text-xs">{num}</span>
+                  </div>
+                  <div>
+                    <p className="text-[13px] font-semibold text-white leading-tight">{text}</p>
+                    <p className="text-[11px] text-neutral-500 mt-0.5">{sub}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => setIsInstallModalOpen(false)}
+              className="w-full bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-sm py-3 rounded-sm active:scale-95 transition-all"
+            >
+              Entendi
+            </button>
+          </div>
+        </div>
+      )}
 
     </div>
   );

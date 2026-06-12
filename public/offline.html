@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Sem Conexão — Bolão Linkado</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      html, body {
+        height: 100%;
+        background: #0D0D0D;
+        color: #fff;
+        font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: env(safe-area-inset-top, 20px) env(safe-area-inset-right, 20px) env(safe-area-inset-bottom, 20px) env(safe-area-inset-left, 20px);
+      }
+      .container {
+        text-align: center;
+        padding: 32px 24px;
+        max-width: 360px;
+        width: 100%;
+      }
+      .icon {
+        width: 72px;
+        height: 72px;
+        background: #1A1A1A;
+        border: 1px solid #262626;
+        border-radius: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 24px;
+        font-size: 32px;
+      }
+      h1 {
+        font-size: 20px;
+        font-weight: 700;
+        color: #fff;
+        margin-bottom: 8px;
+        letter-spacing: -0.3px;
+      }
+      p {
+        font-size: 13px;
+        color: #737373;
+        line-height: 1.6;
+        margin-bottom: 32px;
+      }
+      button {
+        width: 100%;
+        background: #FF7A00;
+        color: #000;
+        font-weight: 700;
+        font-size: 14px;
+        border: none;
+        border-radius: 6px;
+        padding: 14px;
+        cursor: pointer;
+        transition: background 0.15s, transform 0.1s;
+        font-family: inherit;
+      }
+      button:active { transform: scale(0.97); background: #e86e00; }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: #1A1A1A;
+        border: 1px solid #262626;
+        border-radius: 999px;
+        padding: 4px 12px;
+        font-size: 11px;
+        color: #FF7A00;
+        font-weight: 600;
+        margin-bottom: 20px;
+      }
+      .dot {
+        width: 6px;
+        height: 6px;
+        background: #FF7A00;
+        border-radius: 50%;
+        animation: pulse 1.5s infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="icon">⚽</div>
+      <div class="badge"><span class="dot"></span> Sem conexão</div>
+      <h1>Você está offline</h1>
+      <p>Verifique sua conexão com a internet e tente novamente para acessar o Bolão Linkado.</p>
+      <button onclick="window.location.reload()">Tentar novamente</button>
+    </div>
+  </body>
+</html>

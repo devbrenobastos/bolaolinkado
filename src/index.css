@@ -37,3 +37,48 @@
   -ms-overflow-style: none;  /* IE and Edge */
   scrollbar-width: none;  /* Firefox */
 }
+
+/* ============================================
+   PWA — Mobile-First & Safe Area Styles
+   ============================================ */
+
+/* Previne rubber-band scroll no iOS e garante app-like feel */
+html, body {
+  overscroll-behavior: none;
+  overscroll-behavior-y: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Remove o tap highlight azul/cinza no mobile */
+* {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+/* Herança de fonte para inputs e botões (padrão app) */
+button, input, textarea, select {
+  font: inherit;
+}
+
+/* Safe area bottom para iPhones com Home Indicator (notch/Dynamic Island) */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Suporte a notch/Dynamic Island no topo */
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Container principal do app com safe areas completas */
+.app-container {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+/* Bottom nav com safe area para iPhones sem botão home */
+.nav-safe-area {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 8px);
+}
