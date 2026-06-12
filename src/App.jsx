@@ -34,6 +34,45 @@ import 'dayjs/locale/pt-br';
 dayjs.locale('pt-br');
 
 import LiveScoreWidget from './components/LiveScoreWidget';
+import TourOverlay from './components/TourOverlay';
+
+const TOUR_STEPS = [
+  {
+    id: 'welcome',
+    tab: 'inicio',
+    targetId: null,
+    title: 'Bem-vindo ao Palpiteiro Nato! ⚽',
+    text: 'A Copa do Mundo está chegando! Vamos te guiar rapidinho para você não perder nenhum palpite — são só 4 passos simples.',
+  },
+  {
+    id: 'match',
+    tab: 'inicio',
+    targetId: 'tour-match-card',
+    title: 'Dando seu Palpite 🎯',
+    text: 'Use os botões [+] e [−] para apostar o placar que você acha que vai acontecer. Os palpites fecham 15 minutos antes do jogo começar!',
+  },
+  {
+    id: 'pools',
+    tab: 'boloes',
+    targetId: 'tour-boloes-btn',
+    title: 'Seus Bolões 🏆',
+    text: 'Aqui você cria e gerencia seus grupos — família, firma, galera. Cada bolão tem seu próprio ranking. Compartilhe o link e chame seus amigos!',
+  },
+  {
+    id: 'ranking',
+    tab: 'ranking',
+    targetId: 'tour-ranking-section',
+    title: 'Ranking em Tempo Real 📊',
+    text: 'A classificação é atualizada automaticamente quando os jogos terminam. Veja quantos pontos cada um fez e seque seus adversários!',
+  },
+  {
+    id: 'nav',
+    tab: null,
+    targetId: 'tour-bottom-nav',
+    title: 'Tudo pronto! 🚀',
+    text: 'Use a barra abaixo para navegar: Início = palpites • Bolões = seus grupos • Ranking = classificação • Convites = aprovar membros • Perfil = notificações e configurações.',
+  },
+];
 
 const translateTeam = (name) => {
   if (!name) return name;
@@ -357,6 +396,16 @@ export default function App() {
   // History states
   const [historyGuesses, setHistoryGuesses] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  // Onboarding tour
+  const [isTourOpen, setIsTourOpen] = useState(false);
+  const [tourStep, setTourStep] = useState(0);
+
+  // Auto-save indicator (match IDs recently saved)
+  const [savedMatchIds, setSavedMatchIds] = useState(new Set());
+
+  // Pool creation — "Deixar público?" confirm step for non-admins with no fee
+  const [showPublicConfirm, setShowPublicConfirm] = useState(false);
 
   // Expanded guesses state (keyed by match ID)
   const [expandedGuesses, setExpandedGuesses] = useState({});
@@ -776,7 +825,8 @@ export default function App() {
           .insert({
             id: session.user.id,
             full_name: session.user.user_metadata?.full_name || 'Participante',
-            avatar_url: ''
+            avatar_url: '',
+            has_seen_tour: false,
           })
           .select()
           .single();
@@ -789,6 +839,11 @@ export default function App() {
       }
       setProfile(prof);
       setEditName(prof?.full_name || '');
+      if (prof && prof.has_seen_tour === false) {
+        setTourStep(0);
+        setActiveTab('inicio');
+        setIsTourOpen(true);
+      }
 
       // 2. Fetch Matches & Seed if empty
       let { data: dbMatches, error: matchesErr } = await supabase
@@ -1361,7 +1416,8 @@ export default function App() {
           await supabase.from('profiles').upsert({
             id: data.user.id,
             full_name: fullName,
-            avatar_url: ''
+            avatar_url: '',
+            has_seen_tour: false,
           });
         }
         setAuthSuccessMessage('Conta criada com sucesso! Faça login abaixo.');
@@ -1403,6 +1459,7 @@ export default function App() {
     if (!selectedPool || !session) return;
     const match = matches.find(m => m.id === matchId);
     if (isMatchLocked(match.kickoff_time)) return;
+    if (navigator.vibrate) navigator.vibrate(12);
 
     const current = userPredictions[matchId] || { home: 0, away: 0 };
     let val = parseInt(current[side], 10);
@@ -1458,6 +1515,7 @@ export default function App() {
         .select('*')
         .eq('pool_id', selectedPool.id);
       if (updatedGuesses) setPoolGuesses(updatedGuesses);
+      markSaved(matchId);
     } catch (err) {
       console.error('Error saving prediction:', err);
       triggerToast('Erro ao salvar palpite');
@@ -1691,6 +1749,14 @@ export default function App() {
       return;
     }
 
+    const isAdminUser = profile?.role === 'admin';
+
+    // Non-admin without fee: ask "Deixar público?" before proceeding
+    if (!isAdminUser && (!newPoolFee || parseFloat(newPoolFee) === 0) && !showPublicConfirm) {
+      setShowPublicConfirm(true);
+      return;
+    }
+
     // Generate random 8-character unique Invite Code
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let randomLink = '';
@@ -1698,8 +1764,8 @@ export default function App() {
       randomLink += characters.charAt(Math.floor(Math.random() * characters.length));
     }
 
-    const feeVal = newPoolFee ? parseFloat(newPoolFee) : 0;
-    const isPrivate = feeVal > 0 ? newPoolIsPrivate : false; // Force public if free entry
+    const feeVal = isAdminUser ? 0 : (newPoolFee ? parseFloat(newPoolFee) : 0);
+    const isPrivate = isAdminUser ? true : newPoolIsPrivate;
 
     try {
       const { data: newPool, error: poolError } = await supabase
@@ -1737,6 +1803,7 @@ export default function App() {
       setNewPoolMode('total');
       setNewPoolIsPrivate(true);
       setNewPoolAutoApprove(false);
+      setShowPublicConfirm(false);
       setIsCreateModalOpen(false);
       triggerToast(`Bolão "${newPool.name}" criado com sucesso!`);
 
@@ -1745,6 +1812,48 @@ export default function App() {
       console.error(err);
       triggerToast('Erro ao criar bolão');
     }
+  };
+
+  const markSaved = (matchId) => {
+    setSavedMatchIds(prev => new Set([...prev, matchId]));
+    setTimeout(() => {
+      setSavedMatchIds(prev => { const s = new Set(prev); s.delete(matchId); return s; });
+    }, 2000);
+  };
+
+  const getGuessDistribution = (matchId) => {
+    const gs = poolGuesses.filter(g => g.match_id === matchId);
+    if (gs.length < 2) return null;
+    let h = 0, d = 0, a = 0;
+    gs.forEach(g => {
+      if (g.home_guess > g.away_guess) h++;
+      else if (g.home_guess < g.away_guess) a++;
+      else d++;
+    });
+    return {
+      home: Math.round((h / gs.length) * 100),
+      draw: Math.round((d / gs.length) * 100),
+      away: Math.round((a / gs.length) * 100),
+      total: gs.length,
+    };
+  };
+
+  const completeTour = async () => {
+    setIsTourOpen(false);
+    if (session) {
+      await supabase.from('profiles').update({ has_seen_tour: true }).eq('id', session.user.id);
+    }
+  };
+
+  const advanceTour = () => {
+    const next = tourStep + 1;
+    if (next >= TOUR_STEPS.length) {
+      completeTour();
+      return;
+    }
+    const nextTab = TOUR_STEPS[next].tab;
+    if (nextTab) setActiveTab(nextTab);
+    setTourStep(next);
   };
 
   const joinPoolByCodeSilently = async (code) => {
@@ -2043,7 +2152,7 @@ export default function App() {
 
             {/* Selected Pool Selection dropdown if multiple */}
             {pools.length > 1 && (
-              <div className="bg-[#151515] border border-[#262626] rounded-md p-3">
+              <div id="tour-pool-selector" className="bg-[#151515] border border-[#262626] rounded-md p-3">
                 <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block mb-1.5">Mudar de Grupo/Bolão</label>
                 <select
                   value={selectedPool?.id || ''}
@@ -2325,7 +2434,7 @@ export default function App() {
                               transition={{ duration: 0.25 }}
                               className="flex gap-4 overflow-x-auto pb-4 pt-1 no-scrollbar -mx-4 px-4 snap-x"
                             >
-                              {activeMatches.map(match => {
+                              {activeMatches.map((match, matchIdx) => {
                                 const locked = isMatchLocked(match.kickoff_time);
                                 const tbd = isTbdMatch(match);
                                 const pred = userPredictions[match.id] || { home: 0, away: 0 };
@@ -2337,8 +2446,9 @@ export default function App() {
                                 const tiePick = tiebreakerPicks[match.id] || null;
 
                                 return (
-                                  <div 
-                                    key={match.id} 
+                                  <div
+                                    key={match.id}
+                                    id={matchIdx === 0 ? 'tour-match-card' : undefined}
                                     ref={el => carouselItemRefs.current[match.id] = el}
                                     className={`min-w-[280px] w-[280px] snap-center bg-[#151515] border border-[#262626] rounded-md p-4 shadow-card flex flex-col gap-3 transition-opacity duration-200 ${tbd ? 'opacity-50' : ''}`}
                                   >
@@ -2438,6 +2548,42 @@ export default function App() {
                                         <span className="text-[11px] font-bold text-white leading-tight w-full" style={{overflow:'hidden',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical'}}>{translateTeam(match.away_team)}</span>
                                       </div>
                                     </div>
+
+                                    {/* Auto-save indicator */}
+                                    {savedMatchIds.has(match.id) && (
+                                      <motion.div
+                                        initial={{ opacity: 0, y: 4 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0 }}
+                                        className="flex items-center justify-center gap-1 text-[10px] font-bold text-[#2ECC71]"
+                                      >
+                                        <Check className="w-3 h-3" />
+                                        <span>Palpite salvo</span>
+                                      </motion.div>
+                                    )}
+
+                                    {/* Tendência de palpites do bolão */}
+                                    {(() => {
+                                      const dist = getGuessDistribution(match.id);
+                                      if (!dist) return null;
+                                      return (
+                                        <div className="space-y-1 pt-1">
+                                          <p className="text-[9px] text-neutral-500 font-semibold uppercase tracking-wider text-center">
+                                            Tendência do bolão ({dist.total} palpites)
+                                          </p>
+                                          <div className="flex h-1.5 rounded-full overflow-hidden gap-px">
+                                            {dist.home > 0 && <div style={{ width: `${dist.home}%` }} className="bg-[#FF7A00]" title={`${dist.home}% vitória local`} />}
+                                            {dist.draw > 0 && <div style={{ width: `${dist.draw}%` }} className="bg-neutral-500" title={`${dist.draw}% empate`} />}
+                                            {dist.away > 0 && <div style={{ width: `${dist.away}%` }} className="bg-[#64D2FF]" title={`${dist.away}% vitória visitante`} />}
+                                          </div>
+                                          <div className="flex justify-between text-[9px] text-neutral-500 font-medium">
+                                            <span className="text-[#FF7A00]">{dist.home}% {translateTeam(match.home_team).split(' ')[0]}</span>
+                                            {dist.draw > 0 && <span>{dist.draw}% Empate</span>}
+                                            <span className="text-[#64D2FF]">{dist.away}% {translateTeam(match.away_team).split(' ')[0]}</span>
+                                          </div>
+                                        </div>
+                                      );
+                                    })()}
 
                                     <div className="text-center pt-1 border-t border-[#1D1D1D] space-y-2">
                                       {/* Tiebreaker selector — knockout + draw prediction */}
@@ -2912,7 +3058,7 @@ export default function App() {
 
         {/* --- VIEW 3: RANKING & SIMULATOR --- */}
         {activeTab === 'ranking' && (
-          <div className="space-y-6">
+          <div id="tour-ranking-section" className="space-y-6">
             <div>
               <p className="text-xs text-neutral-400 font-semibold tracking-wider uppercase flex items-center gap-1.5 flex-wrap">
                 <span>Classificação Geral</span>
@@ -3385,11 +3531,18 @@ export default function App() {
             </button>
 
             <div>
-              <h2 className="text-xl font-bold text-white">Criar Novo Bolão</h2>
-              <p className="text-xs text-neutral-400 mt-1">Defina o nome da sua liga e a taxa de entrada.</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-xl font-bold text-white">Criar Novo Bolão</h2>
+                {profile?.role === 'admin' && (
+                  <span className="text-[9px] font-bold bg-[#F1C40F]/15 text-[#F1C40F] border border-[#F1C40F]/30 px-2 py-0.5 rounded-sm uppercase tracking-wider">Admin — Exclusivo</span>
+                )}
+              </div>
+              <p className="text-xs text-neutral-400 mt-1">
+                {profile?.role === 'admin' ? 'Bolão privado de admin — apenas convidados, sem taxa.' : 'Defina o nome da sua liga e a taxa de entrada.'}
+              </p>
             </div>
 
-            <form onSubmit={handleCreatePool} className="space-y-4">
+            <form id="create-pool-form" onSubmit={handleCreatePool} className="space-y-4">
               <div className="space-y-1.5">
                 <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider">Nome do Bolão</label>
                 <input 
@@ -3402,18 +3555,20 @@ export default function App() {
                 />
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Taxa de Entrada (R$)</label>
-                <input 
-                  type="number" 
-                  step="0.01"
-                  min="0"
-                  placeholder="Ex: 20.00 (deixe vazio para Grátis)"
-                  value={newPoolFee}
-                  onChange={(e) => setNewPoolFee(e.target.value)}
-                  className="w-full bg-[#1D1D1D] border border-[#262626] rounded-sm px-3.5 py-3.5 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-[#FF7A00] transition-colors"
-                />
-              </div>
+              {profile?.role !== 'admin' && (
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Taxa de Entrada (R$)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Ex: 20.00 (deixe vazio para Grátis)"
+                    value={newPoolFee}
+                    onChange={(e) => { setNewPoolFee(e.target.value); setShowPublicConfirm(false); }}
+                    className="w-full bg-[#1D1D1D] border border-[#262626] rounded-sm px-3.5 py-3.5 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-[#FF7A00] transition-colors"
+                  />
+                </div>
+              )}
 
               <div className="space-y-1.5">
                 <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Modalidade do Bolão</label>
@@ -3445,76 +3600,98 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Privacidade do Bolão</label>
-                <div className="grid grid-cols-2 gap-2 mt-1">
-                  <button
-                    type="button"
-                    disabled={!newPoolFee || parseFloat(newPoolFee) === 0}
-                    onClick={() => setNewPoolIsPrivate(true)}
-                    className={`flex flex-col items-center justify-center p-3 rounded-sm border transition-all text-center ${
-                      (!newPoolFee || parseFloat(newPoolFee) === 0)
-                        ? 'border-[#262626] bg-[#151515] text-neutral-600 cursor-not-allowed opacity-50'
-                        : newPoolIsPrivate 
-                          ? 'border-[#FF7A00] bg-[#FF7A00]/10 text-white' 
+              {profile?.role === 'admin' ? (
+                <div className="flex items-center gap-2 bg-[#1D1D1D] border border-[#262626] rounded-sm px-3.5 py-3 text-xs text-neutral-400">
+                  <Check className="w-4 h-4 text-[#FF7A00] shrink-0" />
+                  <span>Bolão <strong className="text-white">Apenas Convidados</strong> — entrada por código de convite, sem taxa.</span>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-neutral-400 font-bold uppercase tracking-wider block">Privacidade do Bolão</label>
+                  <div className="grid grid-cols-2 gap-2 mt-1">
+                    <button
+                      type="button"
+                      onClick={() => { setNewPoolIsPrivate(true); setShowPublicConfirm(false); }}
+                      className={`flex flex-col items-center justify-center p-3 rounded-sm border transition-all text-center ${
+                        newPoolIsPrivate
+                          ? 'border-[#FF7A00] bg-[#FF7A00]/10 text-white'
                           : 'border-[#262626] bg-[#1D1D1D] text-neutral-400 hover:border-neutral-700'
-                    }`}
-                  >
-                    <span className="text-xs font-bold">Apenas Convidados</span>
-                    <span className="text-[9px] text-neutral-500 mt-1">Código de convite e aprovação</span>
-                  </button>
+                      }`}
+                    >
+                      <span className="text-xs font-bold">Apenas Convidados</span>
+                      <span className="text-[9px] text-neutral-500 mt-1">Código de convite e aprovação</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setNewPoolIsPrivate(false); setShowPublicConfirm(false); }}
+                      className={`flex flex-col items-center justify-center p-3 rounded-sm border transition-all text-center ${
+                        !newPoolIsPrivate
+                          ? 'border-[#FF7A00] bg-[#FF7A00]/10 text-white'
+                          : 'border-[#262626] bg-[#1D1D1D] text-neutral-400 hover:border-neutral-700'
+                      }`}
+                    >
+                      <span className="text-xs font-bold">Livre (Público)</span>
+                      <span className="text-[9px] text-neutral-500 mt-1">Entrada livre, sem aprovação</span>
+                    </button>
+                  </div>
+
+                  {/* Autoaprovação — visível para bolões privados */}
+                  {newPoolIsPrivate && (
+                    <label className="flex items-start gap-2.5 mt-3 cursor-pointer select-none group">
+                      <div className="relative shrink-0 mt-0.5">
+                        <input type="checkbox" checked={newPoolAutoApprove} onChange={(e) => setNewPoolAutoApprove(e.target.checked)} className="sr-only" />
+                        <div className={`w-4 h-4 rounded border transition-all ${newPoolAutoApprove ? 'bg-[#FF7A00] border-[#FF7A00]' : 'bg-[#1D1D1D] border-[#444] group-hover:border-[#FF7A00]/50'}`}>
+                          {newPoolAutoApprove && (
+                            <svg viewBox="0 0 12 12" className="w-full h-full p-0.5" fill="none" stroke="black" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="2,6 5,9 10,3" />
+                            </svg>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-xs font-semibold text-white">Autoaprovação</span>
+                        <p className="text-[10px] text-neutral-500 mt-0.5 leading-relaxed">Quem entrar pelo código de convite já é aprovado automaticamente, sem precisar de moderador.</p>
+                      </div>
+                    </label>
+                  )}
+                </div>
+              )}
+
+              {/* Confirmação "Deixar público?" para não-admins sem taxa */}
+              {showPublicConfirm && profile?.role !== 'admin' && (
+                <div className="bg-[#1D1D1D] border border-[#FF7A00]/30 rounded-sm p-3 space-y-2">
+                  <p className="text-xs text-white font-semibold">Sem taxa de entrada. Deixar o bolão público?</p>
+                  <p className="text-[10px] text-neutral-400 leading-relaxed">Bolões públicos aparecem na lista de bolões abertos para qualquer usuário entrar. Bolões privados ficam acessíveis apenas por código de convite.</p>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => { setNewPoolIsPrivate(false); setShowPublicConfirm(false); setTimeout(() => document.getElementById('create-pool-form')?.requestSubmit(), 0); }}
+                      className="flex-1 bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-xs py-2 rounded-sm active:scale-95 transition-all"
+                    >
+                      Sim, Deixar Público
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setNewPoolIsPrivate(true); setShowPublicConfirm(false); setTimeout(() => document.getElementById('create-pool-form')?.requestSubmit(), 0); }}
+                      className="flex-1 bg-[#262626] hover:bg-[#333] text-white font-bold text-xs py-2 rounded-sm active:scale-95 transition-all"
+                    >
+                      Não, Apenas Convidados
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!showPublicConfirm && (
+                <div className="pt-2">
                   <button
-                    type="button"
-                    onClick={() => setNewPoolIsPrivate(false)}
-                    className={`flex flex-col items-center justify-center p-3 rounded-sm border transition-all text-center ${
-                      (!newPoolFee || parseFloat(newPoolFee) === 0) || !newPoolIsPrivate
-                        ? 'border-[#FF7A00] bg-[#FF7A00]/10 text-white' 
-                        : 'border-[#262626] bg-[#1D1D1D] text-neutral-400 hover:border-neutral-700'
-                    }`}
+                    type="submit"
+                    className="w-full bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-sm h-12 rounded-sm active:scale-95 transition-all flex items-center justify-center gap-1.5"
                   >
-                    <span className="text-xs font-bold">Livre (Público)</span>
-                    <span className="text-[9px] text-neutral-500 mt-1">Entrada livre, sem aprovação</span>
+                    <Trophy className="w-4 h-4" />
+                    <span>CRIAR BOLÃO</span>
                   </button>
                 </div>
-                {(!newPoolFee || parseFloat(newPoolFee) === 0) && (
-                  <span className="text-[9px] text-neutral-500 mt-1 block">Bolões grátis devem obrigatoriamente ser de entrada livre.</span>
-                )}
-
-                {/* Autoaprovação — só visível quando "Apenas Convidados" está selecionado */}
-                {newPoolIsPrivate && newPoolFee && parseFloat(newPoolFee) > 0 && (
-                  <label className="flex items-start gap-2.5 mt-3 cursor-pointer select-none group">
-                    <div className="relative shrink-0 mt-0.5">
-                      <input
-                        type="checkbox"
-                        checked={newPoolAutoApprove}
-                        onChange={(e) => setNewPoolAutoApprove(e.target.checked)}
-                        className="sr-only"
-                      />
-                      <div className={`w-4 h-4 rounded border transition-all ${newPoolAutoApprove ? 'bg-[#FF7A00] border-[#FF7A00]' : 'bg-[#1D1D1D] border-[#444] group-hover:border-[#FF7A00]/50'}`}>
-                        {newPoolAutoApprove && (
-                          <svg viewBox="0 0 12 12" className="w-full h-full p-0.5" fill="none" stroke="black" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="2,6 5,9 10,3" />
-                          </svg>
-                        )}
-                      </div>
-                    </div>
-                    <div>
-                      <span className="text-xs font-semibold text-white">Autoaprovação</span>
-                      <p className="text-[10px] text-neutral-500 mt-0.5 leading-relaxed">Quem entrar pelo código de convite já é aprovado automaticamente, sem precisar de moderador.</p>
-                    </div>
-                  </label>
-                )}
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  className="w-full bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-sm h-12 rounded-sm active:scale-95 transition-all flex items-center justify-center gap-1.5"
-                >
-                  <Trophy className="w-4 h-4" />
-                  <span>CRIAR BOLÃO</span>
-                </button>
-              </div>
+              )}
             </form>
           </div>
         </div>
@@ -3868,8 +4045,19 @@ export default function App() {
         </div>
       )}
 
+      {/* Onboarding tour */}
+      {isTourOpen && (
+        <TourOverlay
+          steps={TOUR_STEPS}
+          currentStep={tourStep}
+          onNext={advanceTour}
+          onSkip={completeTour}
+        />
+      )}
+
       {/* --- PERSISTENT BOTTOM NAVIGATION (Height: 72px) --- */}
       <nav
+        id="tour-bottom-nav"
         style={{
           height: 'calc(72px + env(safe-area-inset-bottom, 0px))',
           paddingBottom: 'env(safe-area-inset-bottom, 0px)',
@@ -3884,7 +4072,8 @@ export default function App() {
           <span className="text-[10px] font-bold">Início</span>
         </button>
 
-        <button 
+        <button
+          id="tour-boloes-btn"
           onClick={() => setActiveTab('boloes')}
           className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'boloes' ? 'text-[#FF7A00]' : 'text-neutral-500 hover:text-white'}`}
         >
