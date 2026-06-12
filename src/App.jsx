@@ -2703,31 +2703,12 @@ export default function App() {
                 <p className="text-xs text-neutral-400 font-semibold tracking-wider uppercase">Meus Grupos</p>
                 <h1 className="text-3xl font-bold tracking-tight mt-1">Bolões Ativos</h1>
               </div>
-              {profile?.role !== 'user' && (
-                <button
-                  onClick={async () => {
-                    const userRole = profile?.role || 'user';
-                    if (userRole === 'user') {
-                      triggerToast('Apenas usuários Premium ou Admin podem criar bolões.');
-                      return;
-                    }
-                    if (userRole === 'premium') {
-                      const { count } = await supabase
-                        .from('pools')
-                        .select('*', { count: 'exact', head: true })
-                        .eq('owner_id', session.user.id);
-                      if (count && count >= 1) {
-                        triggerToast('Limite de 1 bolão atingido para contas Premium!');
-                        return;
-                      }
-                    }
-                    setIsCreateModalOpen(true);
-                  }}
-                  className="bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-sm px-4 py-2 rounded-sm active:scale-95 transition-all flex items-center gap-1.5"
-                >
-                  <Plus className="w-4 h-4 stroke-[3]" /> Criar
-                </button>
-              )}
+              <button
+                onClick={() => setIsCreateModalOpen(true)}
+                className="bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-sm px-4 py-2 rounded-sm active:scale-95 transition-all flex items-center gap-1.5"
+              >
+                <Plus className="w-4 h-4 stroke-[3]" /> Criar
+              </button>
             </div>
 
             {/* Join Pool Form (Always visible at the top of the tab for ease of access) */}
@@ -2846,21 +2827,12 @@ export default function App() {
                       : 'Você ainda não participa de nenhuma liga. Crie seu primeiro bolão ou entre em um existente!'}
                   </p>
                 </div>
-                {profile?.role !== 'user' && (
-                  <button 
-                    onClick={async () => {
-                      const userRole = profile?.role || 'user';
-                      if (userRole === 'user') {
-                        triggerToast('Apenas usuários Premium ou Admin podem criar bolões.');
-                        return;
-                      }
-                      setIsCreateModalOpen(true);
-                    }}
+                  <button
+                    onClick={() => setIsCreateModalOpen(true)}
                     className="w-full max-w-xs bg-[#FF7A00] text-black font-bold text-sm h-[52px] rounded-sm hover:bg-[#FF8C1A] active:scale-95 transition-all mt-2 mx-auto block"
                   >
                     Criar Meu Primeiro Bolão
                   </button>
-                )}
               </div>
             )}
           </div>
