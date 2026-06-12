@@ -808,6 +808,10 @@ export default function App() {
   useEffect(() => {
     if (!selectedPool || !session) return;
 
+    // Limpar estado do bolão anterior imediatamente para evitar dados obsoletos
+    setPoolMembers([]);
+    setPoolGuesses([]);
+
     const loadPoolDetails = async () => {
        // Fetch pool members
       const { data: members, error: membersErr } = await supabase
@@ -3755,14 +3759,14 @@ export default function App() {
               </button>
             </div>
             <p className="text-[12px] text-neutral-400 leading-relaxed">
-              Siga os passos abaixo no <span className="text-white font-semibold">Safari</span> para adicionar o Bolão Linkado à sua tela inicial:
+              Toque em <span className="text-white font-semibold">Instalar Agora</span> para abrir as opções do Safari e depois selecione <span className="text-white font-semibold">"Adicionar à Tela de Início"</span>.
             </p>
             <div className="space-y-3">
               {[
                 {
                   num: 1,
-                  text: 'Toque no botão Compartilhar',
-                  sub: 'Ícone de seta para cima na barra inferior do Safari',
+                  text: 'Toque em "Instalar Agora" abaixo',
+                  sub: 'Vai abrir o menu de compartilhamento do Safari',
                 },
                 {
                   num: 2,
@@ -3791,12 +3795,33 @@ export default function App() {
                 </div>
               ))}
             </div>
-            <button
-              onClick={() => setIsInstallModalOpen(false)}
-              className="w-full bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-sm py-3 rounded-sm active:scale-95 transition-all"
-            >
-              Entendi
-            </button>
+            <div className="space-y-2 pt-1">
+              {typeof navigator !== 'undefined' && navigator.share && (
+                <button
+                  onClick={async () => {
+                    try {
+                      await navigator.share({
+                        title: 'Bolão Linkado',
+                        text: 'Adicione o Bolão Linkado à sua tela inicial!',
+                        url: window.location.href,
+                      });
+                    } catch {
+                      // Usuário cancelou ou erro — sem ação
+                    }
+                  }}
+                  className="w-full bg-[#FF7A00] hover:bg-[#FF8C1A] text-black font-bold text-sm py-3 rounded-sm active:scale-95 transition-all flex items-center justify-center gap-2 shadow-[0_0_16px_rgba(255,122,0,0.3)]"
+                >
+                  <Share2 className="w-4 h-4 text-black" />
+                  Instalar Agora
+                </button>
+              )}
+              <button
+                onClick={() => setIsInstallModalOpen(false)}
+                className="w-full text-neutral-500 text-sm py-2 active:scale-95 transition-all"
+              >
+                Fechar
+              </button>
+            </div>
           </div>
         </div>
       )}
