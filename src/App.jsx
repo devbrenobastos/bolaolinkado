@@ -1619,26 +1619,6 @@ export default function App() {
     e.preventDefault();
     if (!newPoolName.trim() || !session || !profile) return;
 
-    const userRole = profile.role || 'user';
-
-    if (userRole !== 'admin') {
-      const { count, error: countErr } = await supabase
-        .from('pools')
-        .select('*', { count: 'exact', head: true })
-        .eq('owner_id', session.user.id);
-
-      if (countErr) {
-        console.error(countErr);
-        triggerToast('Erro ao validar limite de bolões.');
-        return;
-      }
-
-      if (count && count >= 1) {
-        triggerToast('Limite de 1 bolão atingido para contas Premium/Padrão!');
-        return;
-      }
-    }
-
     // Generate random 8-character unique Invite Code
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let randomLink = '';
