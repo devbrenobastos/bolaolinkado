@@ -595,9 +595,9 @@ Tour navega automaticamente entre abas conforme o usuário avança. Fechar/pular
 
 | Item | Risco | Recomendação | Status Atual |
 |---|---|---|---|
-| `api_rate_limit` sem RLS | Baixo | Habilitar RLS e aplicar política restrict | **Resolvido** (RLS habilitado + restrict a `service_role` ativo) |
-| VAPID private key hardcoded | Médio | Mover para Supabase Secret (`VAPID_PRIVATE_KEY`) | Pendente |
-| `send-push-notification` sem auth | Médio | Adicionar JWT verification + restrição de role admin | **Resolvido** (Ativo na v9 de push: JWT obrigatório + role check) |
+| api_rate_limit sem RLS | Baixo | Habilitar RLS e aplicar política restrict | **Resolvido** (RLS habilitado + restrict a `service_role` ativo) |
+| VAPID private key hardcoded | Médio | Mover para Supabase Secret (`VAPID_PRIVATE_KEY`) | **Resolvido** (Lido dos Secrets do Supabase com fallback seguro) |
+| `send-push-notification` sem auth | Médio | Adicionar JWT verification + restrição de role admin | **Resolvido** (Ativo na v10 de push: JWT/CronSecret + role check) |
 
 ---
 
