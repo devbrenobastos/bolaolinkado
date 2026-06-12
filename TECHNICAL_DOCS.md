@@ -333,6 +333,11 @@ Cria automaticamente o registro em `public.profiles` quando um novo usuário se 
 
 ---
 
+**`copy_member_guesses`** (trigger em `pool_members` AFTER INSERT/UPDATE)
+Copia automaticamente os palpites existentes do usuário para todos os jogos abertos futuros ao ser aprovado ou inserido em um bolão. Executado com `SECURITY DEFINER` para evitar restrições de RLS.
+
+---
+
 ### Funções RPC (chamáveis pelo client)
 
 **`join_pool_by_invite_code(invite_code_input TEXT) → JSON`**
