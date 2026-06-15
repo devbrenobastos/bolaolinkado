@@ -970,23 +970,22 @@ export default function App() {
   const loadPendingApprovals = async () => {
     if (!session || !profile) return;
 
-    // Fetch pools owned by the user
-    const { data: ownedPools } = await supabase
-      .from('pools')
-      .select('id')
-      .eq('owner_id', session.user.id);
+    // Fetch owned pools and admin memberships in parallel
+    const [ownedPoolsRes, adminMembershipsRes] = await Promise.all([
+      supabase
+        .from('pools')
+        .select('id')
+        .eq('owner_id', session.user.id),
+      supabase
+        .from('pool_members')
+        .select('pool_id')
+        .eq('user_id', session.user.id)
+        .eq('role', 'admin')
+        .eq('is_approved', true)
+    ]);
     
-    const ownedIds = ownedPools?.map(p => p.id) || [];
-
-    // Fetch pools where user has 'admin' role in pool_members
-    const { data: adminMemberships } = await supabase
-      .from('pool_members')
-      .select('pool_id')
-      .eq('user_id', session.user.id)
-      .eq('role', 'admin')
-      .eq('is_approved', true);
-
-    const adminIds = adminMemberships?.map(m => m.pool_id) || [];
+    const ownedIds = ownedPoolsRes.data?.map(p => p.id) || [];
+    const adminIds = adminMembershipsRes.data?.map(m => m.pool_id) || [];
 
     const managePoolIds = Array.from(new Set([...ownedIds, ...adminIds]));
     const isGlobalAdmin = profile.role === 'admin';
@@ -1421,26 +1420,47 @@ export default function App() {
     if (!session) return;
     setIsRefreshing(true);
     try {
-      // 1. Fetch Profile
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .maybeSingle();
-      if (prof) {
-        setProfile(prof);
-        setEditName(prof.full_name || '');
+      // Create independent fetch promises to run in parallel
+      const promises = [
+        // 1. Fetch Profile
+        supabase.from('profiles').select('*').eq('id', session.user.id).maybeSingle(),
+        // 2. Fetch Matches
+        supabase.from('matches').select('*').order('kickoff_time', { ascending: true }),
+        // 3. Fetch Pools list
+        loadPoolsData(),
+        // 5. Fetch user guesses
+        supabase.from('guesses').select('match_id, home_guess, away_guess, tiebreaker_pick').eq('user_id', session.user.id),
+        // 6. Fetch pending approvals
+        loadPendingApprovals()
+      ];
+
+      // 4. Fetch selected pool details if active
+      let poolMembersPromise = null;
+      let poolGuessesPromise = null;
+      if (selectedPool) {
+        poolMembersPromise = supabase.from('pool_members').select('joined_at, role, profiles(*)').eq('pool_id', selectedPool.id);
+        poolGuessesPromise = supabase.from('guesses').select('*').eq('pool_id', selectedPool.id);
+        promises.push(poolMembersPromise, poolGuessesPromise);
       }
 
-      // 2. Fetch Matches
-      const { data: dbMatches } = await supabase
-        .from('matches')
-        .select('*')
-        .order('kickoff_time', { ascending: true });
-      if (dbMatches) {
-        setMatches(dbMatches);
+      const results = await Promise.all(promises);
+
+      // Extract parallel results
+      const profResult = results[0];
+      const matchesResult = results[1];
+      const myAllGuessesResult = results[3];
+
+      // Handle Profile
+      if (profResult && profResult.data) {
+        setProfile(profResult.data);
+        setEditName(profResult.data.full_name || '');
+      }
+
+      // Handle Matches
+      if (matchesResult && matchesResult.data) {
+        setMatches(matchesResult.data);
         const initialSims = {};
-        dbMatches.forEach(m => {
+        matchesResult.data.forEach(m => {
           initialSims[m.id] = {
             home: m.home_score !== null ? m.home_score : 0,
             away: m.away_score !== null ? m.away_score : 0
@@ -1449,34 +1469,11 @@ export default function App() {
         setSimulatedScores(initialSims);
       }
 
-      // 3. Fetch Pools list
-      await loadPoolsData();
-
-      // 4. Fetch selected pool details if active
-      if (selectedPool) {
-        const { data: members } = await supabase
-          .from('pool_members')
-          .select('joined_at, role, profiles(*)')
-          .eq('pool_id', selectedPool.id);
-        if (members) setPoolMembers(members);
-
-        const { data: guesses } = await supabase
-          .from('guesses')
-          .select('*')
-          .eq('pool_id', selectedPool.id);
-        if (guesses) setPoolGuesses(guesses);
-      }
-
-      // 5. Fetch user guesses (universal)
-      const { data: myAllGuesses } = await supabase
-        .from('guesses')
-        .select('match_id, home_guess, away_guess, tiebreaker_pick')
-        .eq('user_id', session.user.id);
-
-      if (myAllGuesses) {
+      // Handle User Guesses
+      if (myAllGuessesResult && myAllGuessesResult.data) {
         const preds = {};
         const tbPicks = {};
-        myAllGuesses.forEach(g => {
+        myAllGuessesResult.data.forEach(g => {
           preds[g.match_id] = { home: g.home_guess, away: g.away_guess };
           if (g.tiebreaker_pick) tbPicks[g.match_id] = g.tiebreaker_pick;
         });
@@ -1484,8 +1481,18 @@ export default function App() {
         setTiebreakerPicks(tbPicks);
       }
 
-      // 6. Fetch pending approvals if applicable
-      await loadPendingApprovals();
+      // Handle Selected Pool Details if active
+      if (selectedPool) {
+        const membersResult = results[promises.indexOf(poolMembersPromise)];
+        const guessesResult = results[promises.indexOf(poolGuessesPromise)];
+
+        if (membersResult && membersResult.data) {
+          setPoolMembers(membersResult.data);
+        }
+        if (guessesResult && guessesResult.data) {
+          setPoolGuesses(guessesResult.data);
+        }
+      }
 
       triggerToast('Dados atualizados! 🔄');
     } catch (err) {
