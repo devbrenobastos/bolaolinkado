@@ -303,8 +303,8 @@ Controle de tentativas de força bruta para entrar em bolões por código.
 
 ### Triggers
 
-**`calculate_guess_points`** (trigger em `guesses` AFTER UPDATE/INSERT)
-Calcula automaticamente `points_earned` sempre que um palpite é inserido ou atualizado. Regra de pontuação com multiplicadores por fase:
+**`calculate_guess_points`** (trigger em `guesses` BEFORE INSERT OR UPDATE, além de trigger `trg_update_match_guesses` AFTER UPDATE no `matches` que propaga as atualizações de placar)
+Calcula automaticamente `points_earned` sempre que um palpite é inserido/atualizado ou quando uma partida é encerrada/tem seu placar atualizado. Regra de pontuação com multiplicadores por fase:
 
 | Fase | Multiplicador base |
 |---|---|
@@ -315,7 +315,10 @@ Calcula automaticamente `points_earned` sempre que um palpite é inserido ou atu
 | Semifinal | 6× |
 | Final / 3º lugar | 10× |
 
-Palpite exato (placar correto) vale mais pontos que acertar apenas o vencedor.
+Regra de pontos base:
+- **Placar Exato:** 25 pts
+- **Diferença de Gols Certa:** 15 pts (acertou o vencedor/empate e a diferença exata de gols, ex: palpitou 2x0 e foi 3x1)
+- **Resultado Certo (outra diferença):** 10 pts (acertou apenas quem venceu ou o empate com outra diferença de gols)
 
 ---
 
@@ -452,7 +455,7 @@ Subject: mailto:admin@bolaolink.com
 **Fluxo:**
 1. Em paralelo, busca:
    - Jogos com `pre_match_notif_sent = false` e kickoff entre 28-32 min no futuro
-   - Jogos com `post_match_notif_sent = false` e `is_finished = true` nos últimos 5 min
+   - Jogos com `post_match_notif_sent = false` e `is_finished = true` nas últimas 2 horas (120 min) para evitar perda de notificações
    - Todas as `push_subscriptions`
 2. Se não há jogos nem assinantes → retorna cedo
 3. Para cada jogo pré-match encontrado:
@@ -519,8 +522,8 @@ Subject: mailto:admin@bolaolink.com
 - Visualização: carrossel horizontal (padrão) ou lista expandida
 
 ### Sistema de Pontuação
-- Trigger `calculate_guess_points` calcula automaticamente ao inserir/atualizar guess
-- Acertar placar exato > acertar vencedor/empate
+- Trigger `calculate_guess_points` calcula automaticamente ao inserir/atualizar guess e de forma reativa a atualizações de placares na tabela `matches`.
+- Acertar placar exato (25 pts) > acertar vencedor/empate com mesma diferença de gols (15 pts) > acertar apenas vencedor/empate com outra diferença (10 pts).
 - Multiplicadores por fase (ver tabela acima)
 - Tiebreaker em mata-mata: se o palpite for empate, escolher qual time avança (+5 pts bônus)
 

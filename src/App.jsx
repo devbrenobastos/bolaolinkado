@@ -24,7 +24,8 @@ import {
   Download,
   UserCheck,
   Smartphone,
-  History
+  History,
+  RefreshCw
 } from 'lucide-react';
 import { supabase } from './utils/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -1330,7 +1331,7 @@ export default function App() {
     }
     setPushLoading(true);
     try {
-      const reg = await navigator.serviceWorker.getRegistration('/');
+      const reg = await navigator.serviceWorker.ready;
       if (!reg) {
         triggerToast('Service worker não encontrado. Reabra o app e tente novamente.');
         return;
@@ -1366,11 +1367,34 @@ export default function App() {
           applicationServerKey: urlBase64ToUint8Array(vapidKey),
         });
         const subJson = sub.toJSON();
+
+        // Extrai chaves de forma segura no Android/Chrome
+        const rawP256dh = sub.getKey ? sub.getKey('p256dh') : null;
+        const rawAuth = sub.getKey ? sub.getKey('auth') : null;
+
+        let p256dhStr = '';
+        let authStr = '';
+
+        if (rawP256dh && rawAuth) {
+          const arrToB64U = (ab) => {
+            const arr = new Uint8Array(ab);
+            return window.btoa(String.fromCharCode(...arr))
+              .replace(/\+/g, '-')
+              .replace(/\//g, '_')
+              .replace(/=/g, '');
+          };
+          p256dhStr = arrToB64U(rawP256dh);
+          authStr = arrToB64U(rawAuth);
+        } else {
+          p256dhStr = subJson.keys?.p256dh || '';
+          authStr = subJson.keys?.auth || '';
+        }
+
         await supabase.from('push_subscriptions').upsert({
           user_id: session.user.id,
           endpoint: subJson.endpoint,
-          p256dh: subJson.keys.p256dh,
-          auth: subJson.keys.auth,
+          p256dh: p256dhStr,
+          auth: authStr,
         }, { onConflict: 'user_id,endpoint' });
         setPushSubscribed(true);
         triggerToast('Notificações ativadas! Você receberá lembretes dos jogos.');
@@ -1388,6 +1412,87 @@ export default function App() {
       }
     } finally {
       setPushLoading(false);
+    }
+  };
+
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefreshData = async () => {
+    if (!session) return;
+    setIsRefreshing(true);
+    try {
+      // 1. Fetch Profile
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .maybeSingle();
+      if (prof) {
+        setProfile(prof);
+        setEditName(prof.full_name || '');
+      }
+
+      // 2. Fetch Matches
+      const { data: dbMatches } = await supabase
+        .from('matches')
+        .select('*')
+        .order('kickoff_time', { ascending: true });
+      if (dbMatches) {
+        setMatches(dbMatches);
+        const initialSims = {};
+        dbMatches.forEach(m => {
+          initialSims[m.id] = {
+            home: m.home_score !== null ? m.home_score : 0,
+            away: m.away_score !== null ? m.away_score : 0
+          };
+        });
+        setSimulatedScores(initialSims);
+      }
+
+      // 3. Fetch Pools list
+      await loadPoolsData();
+
+      // 4. Fetch selected pool details if active
+      if (selectedPool) {
+        const { data: members } = await supabase
+          .from('pool_members')
+          .select('joined_at, role, profiles(*)')
+          .eq('pool_id', selectedPool.id);
+        if (members) setPoolMembers(members);
+
+        const { data: guesses } = await supabase
+          .from('guesses')
+          .select('*')
+          .eq('pool_id', selectedPool.id);
+        if (guesses) setPoolGuesses(guesses);
+      }
+
+      // 5. Fetch user guesses (universal)
+      const { data: myAllGuesses } = await supabase
+        .from('guesses')
+        .select('match_id, home_guess, away_guess, tiebreaker_pick')
+        .eq('user_id', session.user.id);
+
+      if (myAllGuesses) {
+        const preds = {};
+        const tbPicks = {};
+        myAllGuesses.forEach(g => {
+          preds[g.match_id] = { home: g.home_guess, away: g.away_guess };
+          if (g.tiebreaker_pick) tbPicks[g.match_id] = g.tiebreaker_pick;
+        });
+        setUserPredictions(preds);
+        setTiebreakerPicks(tbPicks);
+      }
+
+      // 6. Fetch pending approvals if applicable
+      await loadPendingApprovals();
+
+      triggerToast('Dados atualizados! 🔄');
+    } catch (err) {
+      console.error('Error refreshing data:', err);
+      triggerToast('Erro ao atualizar.');
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -1632,7 +1737,9 @@ export default function App() {
     const simResult  = Math.sign(simHome  - simAway);
 
     if (predResult === simResult) {
-      let pts = 10 * mult;
+      const isGoalDifferenceCorrect = (predHome - predAway) === (simHome - simAway);
+      let basePoints = isGoalDifferenceCorrect ? 15 : 10;
+      let pts = basePoints * mult;
       // Tiebreaker bonus: only in knockout when BOTH predicted AND actual result were draws
       if (isKnockout && predResult === 0 && simResult === 0 && tiebreaker && advanceTeam) {
         if (tiebreaker === advanceTeam) pts += 5 * mult;
@@ -4084,11 +4191,18 @@ export default function App() {
                     </tr>
                     <tr>
                       <td className="p-2.5">
-                        <p className="font-bold text-white">Resultado Certo (placar errado)</p>
-                        <p className="text-[10px] text-neutral-500 mt-0.5">Acertou quem vence <span className="italic">ou</span> que seria empate, mesmo errando o placar.</p>
+                        <p className="font-bold text-white">Diferença de Gols Certa</p>
+                        <p className="text-[10px] text-neutral-500 mt-0.5">Acertou o vencedor/empate e a diferença exata de gols.</p>
+                        <p className="text-[10px] text-neutral-400 mt-1">Ex: palpitou <span className="text-white font-bold">2×0</span> → saiu <span className="text-white font-bold">3×1</span> → diferença de 2 gols ✅ = 15 pts</p>
+                      </td>
+                      <td className="p-2.5 text-right text-[#FF7A00] font-black text-base align-top">15 pts</td>
+                    </tr>
+                    <tr>
+                      <td className="p-2.5">
+                        <p className="font-bold text-white">Resultado Certo (outra diferença)</p>
+                        <p className="text-[10px] text-neutral-500 mt-0.5">Acertou o vencedor/empate, mas errou a diferença de gols.</p>
                         <div className="mt-1.5 space-y-0.5">
-                          <p className="text-[10px] text-neutral-400">Ex1: palpitou <span className="text-white font-bold">2×2</span> → saiu <span className="text-white font-bold">1×1</span> → acertou empate ✅ = 10 pts</p>
-                          <p className="text-[10px] text-neutral-400">Ex2: palpitou <span className="text-white font-bold">1×0</span> → saiu <span className="text-white font-bold">3×1</span> → acertou vencedor ✅ = 10 pts</p>
+                          <p className="text-[10px] text-neutral-400">Ex: palpitou <span className="text-white font-bold">1×0</span> → saiu <span className="text-white font-bold">3×1</span> → acertou vencedor (dif. 1 vs 2) ✅ = 10 pts</p>
                         </div>
                       </td>
                       <td className="p-2.5 text-right text-[#3B82F6] font-black text-base align-top">10 pts</td>
@@ -4159,6 +4273,18 @@ export default function App() {
           onNext={advanceTour}
           onSkip={completeTour}
         />
+      )}
+
+      {/* Floating Refresh Button */}
+      {session && (
+        <button
+          onClick={handleRefreshData}
+          disabled={isRefreshing}
+          className={`fixed bottom-[88px] right-4 z-30 w-11 h-11 rounded-full bg-[#151515]/90 backdrop-blur-md border border-[#262626] shadow-lg flex items-center justify-center text-white hover:text-[#FF7A00] hover:border-[#FF7A00]/40 transition-all active:scale-90 focus:outline-none ${isRefreshing ? 'opacity-50 cursor-not-allowed' : ''}`}
+          title="Atualizar dados"
+        >
+          <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin text-[#FF7A00]' : ''}`} />
+        </button>
       )}
 
       {/* --- PERSISTENT BOTTOM NAVIGATION (Height: 72px) --- */}
