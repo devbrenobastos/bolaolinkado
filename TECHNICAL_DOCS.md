@@ -317,8 +317,8 @@ Calcula automaticamente `points_earned` sempre que um palpite é inserido/atuali
 
 Regra de pontos base:
 - **Placar Exato:** 25 pts
-- **Diferença de Gols Certa:** 15 pts (acertou o vencedor/empate e a diferença exata de gols, ex: palpitou 2x0 e foi 3x1)
-- **Resultado Certo (outra diferença):** 10 pts (acertou apenas quem venceu ou o empate com outra diferença de gols)
+- **Diferença de Gols Certa:** 15 pts (acertou o vencedor e a diferença exata de gols, exceto empates, ex: palpitou 2x0 e foi 3x1)
+- **Resultado Certo (outra diferença):** 10 pts (acertou apenas quem venceu ou qualquer empate com placar diferente do exato)
 
 ---
 

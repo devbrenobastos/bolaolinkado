@@ -1744,7 +1744,7 @@ export default function App() {
     const simResult  = Math.sign(simHome  - simAway);
 
     if (predResult === simResult) {
-      const isGoalDifferenceCorrect = (predHome - predAway) === (simHome - simAway);
+      const isGoalDifferenceCorrect = predResult !== 0 && (predHome - predAway) === (simHome - simAway);
       let basePoints = isGoalDifferenceCorrect ? 15 : 10;
       let pts = basePoints * mult;
       // Tiebreaker bonus: only in knockout when BOTH predicted AND actual result were draws
