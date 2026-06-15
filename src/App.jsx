@@ -4280,7 +4280,7 @@ export default function App() {
         <button
           onClick={handleRefreshData}
           disabled={isRefreshing}
-          className={`fixed bottom-[88px] right-4 z-30 w-11 h-11 rounded-full bg-[#151515]/90 backdrop-blur-md border border-[#262626] shadow-lg flex items-center justify-center text-white hover:text-[#FF7A00] hover:border-[#FF7A00]/40 transition-all active:scale-90 focus:outline-none ${isRefreshing ? 'opacity-50 cursor-not-allowed' : ''}`}
+          className={`fixed bottom-[calc(72px+env(safe-area-inset-bottom,0px)+16px)] right-4 z-30 w-11 h-11 rounded-full bg-[#151515]/90 backdrop-blur-md border border-[#262626] shadow-lg flex items-center justify-center text-white hover:text-[#FF7A00] hover:border-[#FF7A00]/40 transition-all active:scale-90 focus:outline-none ${isRefreshing ? 'opacity-50 cursor-not-allowed' : ''}`}
           title="Atualizar dados"
         >
           <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin text-[#FF7A00]' : ''}`} />
