@@ -1,11 +1,11 @@
 // ============================================
-// Palpiteiro Nato — Service Worker v5
+// Palpiteiro Nato — Service Worker v6
 // Estratégia: Cache-First para estáticos,
 //             Network-First para navegação,
 //             Push Notifications
 // ============================================
 
-const CACHE_VERSION = 'v5';
+const CACHE_VERSION = 'v6';
 const STATIC_CACHE = `bolao-static-${CACHE_VERSION}`;
 const DYNAMIC_CACHE = `bolao-dynamic-${CACHE_VERSION}`;
 

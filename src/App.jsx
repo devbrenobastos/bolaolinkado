@@ -759,10 +759,11 @@ export default function App() {
   }, [session]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Polling fallback: 2min during live matches, 5min otherwise
-  const hasLiveMatch = matches.some(m => !m.is_finished && isMatchLocked(m.kickoff_time));
+  const matchesRef = React.useRef(matches);
+  matchesRef.current = matches;
   useEffect(() => {
     if (!session) return;
-    const interval = setInterval(async () => {
+    const pollMatches = async () => {
       const { data } = await supabase.from('matches').select(MATCHES_COLUMNS).order('kickoff_time', { ascending: true });
       if (data) {
         setMatches(prev => {
@@ -770,9 +771,18 @@ export default function App() {
           return changed || data.length !== prev.length ? data : prev;
         });
       }
-    }, hasLiveMatch ? 120000 : 300000);
-    return () => clearInterval(interval);
-  }, [session, hasLiveMatch]);
+      scheduleNext();
+    };
+    let timer;
+    const scheduleNext = () => {
+      const now = new Date();
+      const cutoff = new Date(now.getTime() + 15 * 60 * 1000);
+      const hasLive = matchesRef.current.some(m => !m.is_finished && new Date(m.kickoff_time) <= cutoff);
+      timer = setTimeout(pollMatches, hasLive ? 120000 : 300000);
+    };
+    scheduleNext();
+    return () => clearTimeout(timer);
+  }, [session]);
 
   // Realtime subscription for matches and guesses
   useEffect(() => {
