@@ -914,22 +914,23 @@ export default function App() {
         setPoolMembers(members || []);
       }
 
-      // Fetch guesses for this pool (used for ranking + trend bar)
-      const { data: guesses, error: guessesErr } = await supabase
-        .from('guesses')
-        .select(POOL_GUESSES_COLUMNS)
-        .eq('pool_id', selectedPool.id);
+      // Fetch guesses for this pool + user's own guesses in parallel
+      const [poolGuessesRes, userGuessesRes] = await Promise.all([
+        supabase.from('guesses').select(POOL_GUESSES_COLUMNS).eq('pool_id', selectedPool.id),
+        supabase.from('guesses').select(USER_GUESSES_COLUMNS).eq('user_id', session.user.id)
+      ]);
 
-      if (guessesErr) {
-        console.error('Error fetching pool guesses:', guessesErr);
+      if (poolGuessesRes.error) {
+        console.error('Error fetching pool guesses:', poolGuessesRes.error);
       } else {
-        setPoolGuesses(guesses || []);
+        setPoolGuesses(poolGuessesRes.data || []);
+      }
 
-        // Extract current user's predictions from pool guesses (avoids extra query)
+      if (userGuessesRes.data) {
         const preds = {};
         const tbPicks = {};
-        (guesses || []).forEach(g => {
-          if (g.user_id === session.user.id && !preds[g.match_id]) {
+        userGuessesRes.data.forEach(g => {
+          if (!preds[g.match_id]) {
             preds[g.match_id] = { home: g.home_guess, away: g.away_guess };
             if (g.tiebreaker_pick) tbPicks[g.match_id] = g.tiebreaker_pick;
           }
@@ -1436,6 +1437,21 @@ export default function App() {
         setSimulatedScores(initialSims);
       }
 
+      // Fetch user's own guesses (universal across all pools)
+      const userGuessesRes = await supabase.from('guesses').select(USER_GUESSES_COLUMNS).eq('user_id', session.user.id);
+      if (userGuessesRes.data) {
+        const preds = {};
+        const tbPicks = {};
+        userGuessesRes.data.forEach(g => {
+          if (!preds[g.match_id]) {
+            preds[g.match_id] = { home: g.home_guess, away: g.away_guess };
+            if (g.tiebreaker_pick) tbPicks[g.match_id] = g.tiebreaker_pick;
+          }
+        });
+        setUserPredictions(preds);
+        setTiebreakerPicks(tbPicks);
+      }
+
       if (selectedPool) {
         const membersResult = results[4];
         const guessesResult = results[5];
@@ -1445,16 +1461,6 @@ export default function App() {
         }
         if (guessesResult && guessesResult.data) {
           setPoolGuesses(guessesResult.data);
-          const preds = {};
-          const tbPicks = {};
-          guessesResult.data.forEach(g => {
-            if (g.user_id === session.user.id && !preds[g.match_id]) {
-              preds[g.match_id] = { home: g.home_guess, away: g.away_guess };
-              if (g.tiebreaker_pick) tbPicks[g.match_id] = g.tiebreaker_pick;
-            }
-          });
-          setUserPredictions(preds);
-          setTiebreakerPicks(tbPicks);
         }
       }
 
