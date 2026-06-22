@@ -2384,6 +2384,18 @@ export default function App() {
                             <span className="text-neutral-500 italic">Sem palpite registrado</span>
                           )}
                         </div>
+
+                        {/* Participant guesses for Live Match */}
+                        <div className="mt-2.5 pt-2.5 border-t border-[#262626]/40">
+                          <button
+                            onClick={() => toggleGuessesExpansion(match.id)}
+                            className="w-full py-1 bg-[#1D1D1D]/60 hover:bg-[#262626]/60 border border-[#262626]/60 rounded-sm text-[9px] font-bold text-neutral-400 hover:text-white transition-all flex items-center justify-center gap-1 focus:outline-none"
+                          >
+                            <span>👥 Palpites do grupo</span>
+                            <span>{expandedGuesses[match.id] ? '▲' : '▼'}</span>
+                          </button>
+                          {expandedGuesses[match.id] && renderParticipantGuesses(match.id)}
+                        </div>
                       </div>
                     );
                   })}
