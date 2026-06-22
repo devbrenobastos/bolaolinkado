@@ -138,6 +138,10 @@ const translateTeam = (name) => {
 // Current local time
 const CURRENT_TIME = new Date();
 
+const MATCHES_COLUMNS = 'id,home_team,away_team,home_score,away_score,phase,kickoff_time,is_finished,home_team_crest,away_team_crest,advance_team';
+const POOL_GUESSES_COLUMNS = 'id,user_id,match_id,pool_id,home_guess,away_guess,tiebreaker_pick';
+const USER_GUESSES_COLUMNS = 'match_id,home_guess,away_guess,tiebreaker_pick';
+
 // Phase Multipliers and Labels
 const PHASE_MAP = {
   groups: { label: '1ª Fase', mult: 1 },
@@ -336,6 +340,7 @@ export default function App() {
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
   const carouselItemRefs = React.useRef({});
+  const hasAutoScrolled = React.useRef(false);
   const [isListExpanded, setIsListExpanded] = useState(false);
   const [selectedPhaseFilter, setSelectedPhaseFilter] = useState('all');
   const [hasInitializedFilter, setHasInitializedFilter] = useState(false);
@@ -690,9 +695,13 @@ export default function App() {
     localStorage.setItem('bolao_active_tab', activeTab);
   }, [activeTab]);
 
-  // Auto-scroll Carousel to the next guessable match
+  // Auto-scroll Carousel to the next guessable match (only once per pool/tab switch)
   useEffect(() => {
-    if (!selectedPool || activeTab !== 'inicio') return;
+    hasAutoScrolled.current = false;
+  }, [selectedPool, activeTab]);
+
+  useEffect(() => {
+    if (!selectedPool || activeTab !== 'inicio' || hasAutoScrolled.current) return;
 
     const activeMatches = matches.filter(match => {
       const isTbd = isTbdMatch(match);
@@ -704,6 +713,7 @@ export default function App() {
     if (activeMatches.length > 0 && !isListExpanded) {
       const nextMatch = activeMatches.find(m => !isMatchLocked(m.kickoff_time));
       if (nextMatch && carouselItemRefs.current[nextMatch.id]) {
+        hasAutoScrolled.current = true;
         const timer = setTimeout(() => {
           carouselItemRefs.current[nextMatch.id].scrollIntoView({
             behavior: 'smooth',
@@ -748,16 +758,21 @@ export default function App() {
     joinPoolByCodeSilently(pendingCode);
   }, [session]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Polling fallback: re-fetch matches every 60s to catch live score updates
-  // if the Realtime WebSocket drops (common on mobile/PWA background/foreground)
+  // Polling fallback: 2min during live matches, 5min otherwise
+  const hasLiveMatch = matches.some(m => !m.is_finished && isMatchLocked(m.kickoff_time));
   useEffect(() => {
     if (!session) return;
     const interval = setInterval(async () => {
-      const { data } = await supabase.from('matches').select('*').order('kickoff_time', { ascending: true });
-      if (data) setMatches(data);
-    }, 60000);
+      const { data } = await supabase.from('matches').select(MATCHES_COLUMNS).order('kickoff_time', { ascending: true });
+      if (data) {
+        setMatches(prev => {
+          const changed = data.some((m, i) => !prev[i] || m.home_score !== prev[i].home_score || m.away_score !== prev[i].away_score || m.is_finished !== prev[i].is_finished || m.advance_team !== prev[i].advance_team);
+          return changed || data.length !== prev.length ? data : prev;
+        });
+      }
+    }, hasLiveMatch ? 120000 : 300000);
     return () => clearInterval(interval);
-  }, [session]);
+  }, [session, hasLiveMatch]);
 
   // Realtime subscription for matches and guesses
   useEffect(() => {
@@ -767,49 +782,17 @@ export default function App() {
       .channel('realtime-matches')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'matches' },
+        { event: 'UPDATE', schema: 'public', table: 'matches' },
         (payload) => {
-          if (payload.eventType === 'UPDATE') {
-            setMatches(prev => prev.map(m => m.id === payload.new.id ? payload.new : m));
-          } else if (payload.eventType === 'INSERT') {
-            setMatches(prev => [...prev, payload.new].sort((a, b) => new Date(a.kickoff_time) - new Date(b.kickoff_time)));
-          } else if (payload.eventType === 'DELETE') {
-            setMatches(prev => prev.filter(m => m.id !== payload.old.id));
-          }
-        }
-      )
-      .subscribe();
-
-    const guessesChannel = supabase
-      .channel('realtime-guesses')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'guesses' },
-        (payload) => {
-          if (!selectedPool) return;
-          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-            if (payload.new.pool_id === selectedPool.id) {
-              setPoolGuesses(prev => {
-                const exists = prev.some(g => g.id === payload.new.id);
-                if (exists) {
-                  return prev.map(g => g.id === payload.new.id ? payload.new : g);
-                } else {
-                  return [...prev, payload.new];
-                }
-              });
-            }
-          } else if (payload.eventType === 'DELETE') {
-            setPoolGuesses(prev => prev.filter(g => g.id !== payload.old.id));
-          }
+          setMatches(prev => prev.map(m => m.id === payload.new.id ? { ...m, ...payload.new } : m));
         }
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(matchesChannel);
-      supabase.removeChannel(guessesChannel);
     };
-  }, [session, selectedPool]);
+  }, [session]);
 
   // Fetch / Seed profile and load matches/pools on session state
   useEffect(() => {
@@ -824,7 +807,7 @@ export default function App() {
       // 1. Fetch Profile
       let { data: prof, error: profileErr } = await supabase
         .from('profiles')
-        .select('*')
+        .select('id,full_name,avatar_url,role,has_seen_tour')
         .eq('id', session.user.id)
         .maybeSingle();
 
@@ -862,7 +845,7 @@ export default function App() {
       // 2. Fetch Matches & Seed if empty
       let { data: dbMatches, error: matchesErr } = await supabase
         .from('matches')
-        .select('*')
+        .select(MATCHES_COLUMNS)
         .order('kickoff_time', { ascending: true });
 
       if (matchesErr) {
@@ -922,7 +905,7 @@ export default function App() {
        // Fetch pool members
       const { data: members, error: membersErr } = await supabase
         .from('pool_members')
-        .select('joined_at, role, profiles(*)')
+        .select('joined_at, role, profiles(id,full_name,avatar_url,role)')
         .eq('pool_id', selectedPool.id);
 
       if (membersErr) {
@@ -931,34 +914,29 @@ export default function App() {
         setPoolMembers(members || []);
       }
 
-      // Fetch guesses for this pool
+      // Fetch guesses for this pool (used for ranking + trend bar)
       const { data: guesses, error: guessesErr } = await supabase
         .from('guesses')
-        .select('*')
+        .select(POOL_GUESSES_COLUMNS)
         .eq('pool_id', selectedPool.id);
 
       if (guessesErr) {
         console.error('Error fetching pool guesses:', guessesErr);
       } else {
         setPoolGuesses(guesses || []);
+
+        // Extract current user's predictions from pool guesses (avoids extra query)
+        const preds = {};
+        const tbPicks = {};
+        (guesses || []).forEach(g => {
+          if (g.user_id === session.user.id && !preds[g.match_id]) {
+            preds[g.match_id] = { home: g.home_guess, away: g.away_guess };
+            if (g.tiebreaker_pick) tbPicks[g.match_id] = g.tiebreaker_pick;
+          }
+        });
+        setUserPredictions(preds);
+        setTiebreakerPicks(tbPicks);
       }
-
-      // Load current user's predictions from ALL pools (universal palpites)
-      const { data: myAllGuesses } = await supabase
-        .from('guesses')
-        .select('match_id, home_guess, away_guess, tiebreaker_pick')
-        .eq('user_id', session.user.id);
-
-      const preds = {};
-      const tbPicks = {};
-      myAllGuesses?.forEach(g => {
-        if (!preds[g.match_id]) {
-          preds[g.match_id] = { home: g.home_guess, away: g.away_guess };
-          if (g.tiebreaker_pick) tbPicks[g.match_id] = g.tiebreaker_pick;
-        }
-      });
-      setUserPredictions(preds);
-      setTiebreakerPicks(tbPicks);
     };
 
     if (selectedPool) {
@@ -1136,7 +1114,7 @@ export default function App() {
 
     const { data: memberPools, error: poolsErr } = await supabase
       .from('pool_members')
-      .select('pool_id, pools(*)')
+      .select('pool_id, pools(id,name,owner_id,entry_fee,invite_code,mode,is_private,auto_approve,match_id)')
       .eq('user_id', session.user.id)
       .eq('is_approved', true);
 
@@ -1422,41 +1400,30 @@ export default function App() {
     try {
       // Create independent fetch promises to run in parallel
       const promises = [
-        // 1. Fetch Profile
-        supabase.from('profiles').select('*').eq('id', session.user.id).maybeSingle(),
-        // 2. Fetch Matches
-        supabase.from('matches').select('*').order('kickoff_time', { ascending: true }),
-        // 3. Fetch Pools list
+        supabase.from('profiles').select('id,full_name,avatar_url,role,has_seen_tour').eq('id', session.user.id).maybeSingle(),
+        supabase.from('matches').select(MATCHES_COLUMNS).order('kickoff_time', { ascending: true }),
         loadPoolsData(),
-        // 5. Fetch user guesses
-        supabase.from('guesses').select('match_id, home_guess, away_guess, tiebreaker_pick').eq('user_id', session.user.id),
-        // 6. Fetch pending approvals
         loadPendingApprovals()
       ];
 
-      // 4. Fetch selected pool details if active
       let poolMembersPromise = null;
       let poolGuessesPromise = null;
       if (selectedPool) {
-        poolMembersPromise = supabase.from('pool_members').select('joined_at, role, profiles(*)').eq('pool_id', selectedPool.id);
-        poolGuessesPromise = supabase.from('guesses').select('*').eq('pool_id', selectedPool.id);
+        poolMembersPromise = supabase.from('pool_members').select('joined_at, role, profiles(id,full_name,avatar_url,role)').eq('pool_id', selectedPool.id);
+        poolGuessesPromise = supabase.from('guesses').select(POOL_GUESSES_COLUMNS).eq('pool_id', selectedPool.id);
         promises.push(poolMembersPromise, poolGuessesPromise);
       }
 
       const results = await Promise.all(promises);
 
-      // Extract parallel results
       const profResult = results[0];
       const matchesResult = results[1];
-      const myAllGuessesResult = results[3];
 
-      // Handle Profile
       if (profResult && profResult.data) {
         setProfile(profResult.data);
         setEditName(profResult.data.full_name || '');
       }
 
-      // Handle Matches
       if (matchesResult && matchesResult.data) {
         setMatches(matchesResult.data);
         const initialSims = {};
@@ -1469,28 +1436,25 @@ export default function App() {
         setSimulatedScores(initialSims);
       }
 
-      // Handle User Guesses
-      if (myAllGuessesResult && myAllGuessesResult.data) {
-        const preds = {};
-        const tbPicks = {};
-        myAllGuessesResult.data.forEach(g => {
-          preds[g.match_id] = { home: g.home_guess, away: g.away_guess };
-          if (g.tiebreaker_pick) tbPicks[g.match_id] = g.tiebreaker_pick;
-        });
-        setUserPredictions(preds);
-        setTiebreakerPicks(tbPicks);
-      }
-
-      // Handle Selected Pool Details if active
       if (selectedPool) {
-        const membersResult = results[promises.indexOf(poolMembersPromise)];
-        const guessesResult = results[promises.indexOf(poolGuessesPromise)];
+        const membersResult = results[4];
+        const guessesResult = results[5];
 
         if (membersResult && membersResult.data) {
           setPoolMembers(membersResult.data);
         }
         if (guessesResult && guessesResult.data) {
           setPoolGuesses(guessesResult.data);
+          const preds = {};
+          const tbPicks = {};
+          guessesResult.data.forEach(g => {
+            if (g.user_id === session.user.id && !preds[g.match_id]) {
+              preds[g.match_id] = { home: g.home_guess, away: g.away_guess };
+              if (g.tiebreaker_pick) tbPicks[g.match_id] = g.tiebreaker_pick;
+            }
+          });
+          setUserPredictions(preds);
+          setTiebreakerPicks(tbPicks);
         }
       }
 
@@ -1634,12 +1598,19 @@ export default function App() {
         if (upsertErr) throw upsertErr;
       }
 
-      // Reload pool guesses to keep state in sync
-      const { data: updatedGuesses } = await supabase
-        .from('guesses')
-        .select('*')
-        .eq('pool_id', selectedPool.id);
-      if (updatedGuesses) setPoolGuesses(updatedGuesses);
+      // Update pool guesses optimistically instead of refetching
+      setPoolGuesses(prev => {
+        const updated = [...prev];
+        for (const gu of guessesToUpsert) {
+          const idx = updated.findIndex(g => g.user_id === gu.user_id && g.match_id === gu.match_id && g.pool_id === gu.pool_id);
+          if (idx >= 0) {
+            updated[idx] = { ...updated[idx], ...gu };
+          } else {
+            updated.push({ id: `temp-${gu.pool_id}-${gu.match_id}`, ...gu, tiebreaker_pick: tiebreakerPicks[matchId] || null });
+          }
+        }
+        return updated;
+      });
       markSaved(matchId);
     } catch (err) {
       console.error('Error saving prediction:', err);
@@ -1668,19 +1639,18 @@ export default function App() {
     setTiebreakerPicks(prev => ({ ...prev, [matchId]: newPick }));
 
     try {
-      const promises = pools.map(pool =>
-        supabase
-          .from('guesses')
-          .upsert({
-            user_id: session.user.id,
-            match_id: matchId,
-            pool_id: pool.id,
-            home_guess: cleanHome,
-            away_guess: cleanAway,
-            tiebreaker_pick: newPick
-          }, { onConflict: 'user_id,match_id,pool_id' })
-      );
-      await Promise.all(promises);
+      const tiebreakerUpserts = pools.map(pool => ({
+        user_id: session.user.id,
+        match_id: matchId,
+        pool_id: pool.id,
+        home_guess: cleanHome,
+        away_guess: cleanAway,
+        tiebreaker_pick: newPick
+      }));
+      const { error: tbErr } = await supabase
+        .from('guesses')
+        .upsert(tiebreakerUpserts, { onConflict: 'user_id,match_id,pool_id' });
+      if (tbErr) throw tbErr;
       triggerToast(newPick
         ? `Classificado: ${newPick === 'home' ? translateTeam(match.home_team) : translateTeam(match.away_team)}`
         : 'Palpite de classificado removido');
@@ -2097,7 +2067,7 @@ export default function App() {
 
       let query = supabase
         .from('pools')
-        .select('*')
+        .select('id,name,owner_id,entry_fee,invite_code,mode,is_private,auto_approve,match_id')
         .eq('is_private', false);
 
       if (myPoolIds.length > 0) {
